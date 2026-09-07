@@ -1,0 +1,68 @@
+Use case: logo-brand
+Asset type: master icon for the ForgeSweep native macOS developer cleanup utility
+Input images: Image 1: style reference only; use its extreme simplification, soft rounded proportions, sparse facial features, flat color blocks, and approachable anthropomorphic mood; do not copy its exact character, silhouette, colors, or composition
+Primary request: create an original, simplified anthropomorphic field-mouse / mole construction engineer mascot
+Subject: one warm light-gray field mouse / mole bust with a soft bean-shaped head, two small rounded dark ears, two tiny vertical oval eyes, a tiny dark nose, and a subtle confident expression; wearing a very simple muted construction-yellow safety helmet and a minimal teal work-jacket collar
+Style/medium: minimal flat 2D character logo, soft hand-drawn geometric shapes, friendly contemporary developer-tool mascot, restrained and tasteful
+Scene/backdrop: one solid deep graphite-blue rounded-square icon tile with genuine transparency outside
+Composition/framing: centered slightly asymmetrical bust, large face, generous safe margin, bold simple silhouette, immediately readable at 18px
+Color palette: solid deep graphite-blue, warm off-white/light gray, dark charcoal, muted construction yellow, and one restrained teal accent
+Constraints: no text; no letters; no watermark; one character only; no tools; no whiskers; no detailed muzzle; no fur texture; no extra decorative objects; original design distinct from Image 1
+Avoid: realism, detailed anatomy, big circular ears, teddy-bear face, rat face, 3D, gradients, shadows, glow, bevels, glossy surfaces, elaborate helmet, construction-site scene, overly childish expression, copied character design, mockup presentation
+
+Final simplification and theme pass
+Use case: precise-object-edit
+Asset type: final ForgeSweep macOS app icon master
+Input images: Image 1: edit target
+Primary request: simplify Image 1 further into only a construction helmet and the upper half of the mascot's head
+Composition change: remove the entire jacket, collar, neck, shoulders, and lower half of the head; crop the character at mid-face so only the helmet, small ears, forehead, two tiny oval eyes, and tiny nose remain, emerging from the bottom edge; enlarge this compact head-and-hat symbol and center it with generous safe margin
+Color change: match the app theme exactly—solid deep graphite #20282B rounded-square background, solid theme teal #14B39E helmet, warm off-white #F2F0E9 head, dark charcoal #222426 ears/eyes/nose; no yellow
+Style invariants: preserve the appealing soft bean-shaped character language, sparse facial features, subtle asymmetry, and friendly anthropomorphic mood from Image 1
+Constraints: pure flat solid fills; genuine transparency outside the rounded-square tile; strong silhouette at 18px; one character only; no text; no watermark; no body; no clothes; no tools; no sparkle; no whiskers; no mouth; no detailed muzzle
+Avoid: gradients, shadows, glow, highlights, depth, texture, 3D, large circular ears, rat anatomy, teddy-bear styling, elaborate helmet, background scene, mockup presentation
+
+Final color and pose pass
+Use case: precise-object-edit
+Asset type: final ForgeSweep macOS app icon master
+Input images: Image 1: edit target
+Primary request: make exactly two design changes to Image 1: change the safety helmet to clear construction yellow, and give the cropped mascot head a lively natural tilt
+Color change: helmet main fill must be solid engineering yellow #F4C542 with dark ochre #C9961A only for its two simple grooves; keep the dark graphite #20282B background and warm off-white head; use the app teal #14B39E only as one very small restrained accent on the helmet brim, not as the helmet's main color
+Pose change: tilt the helmet, ears, eyes, nose, and half-head together by about 9 degrees as one coherent character pose; keep the head emerging from the bottom edge and keep the overall mark visually balanced and centered
+Style invariants: preserve the extremely simplified anthropomorphic character, only half a head plus helmet, sparse oval eyes and tiny nose, soft bean-shaped silhouette, flat developer-tool mascot style
+Constraints: genuine alpha transparency outside the rounded-square tile; clean bottom and outer edges with no white fringe; strong readability at 18px; no body; no clothes; no tools; no sparkle; no whiskers; no mouth; no text; no watermark
+Avoid: teal helmet, orange helmet, gradients, glow, 3D, realistic anatomy, excessive rotation, extra objects, background scene, mockup presentation
+
+Final scale pass
+Use case: precise-object-edit
+Asset type: final ForgeSweep macOS app icon master
+Input images: Image 1: edit target
+Primary request: change only the scale and vertical placement of the existing tilted half-head and yellow helmet so the symbol reads more strongly at 18px
+Composition change: enlarge the complete character group by about 18 percent and move it upward so the top of the helmet begins around 24 percent from the top of the rounded-square tile; keep the lower face intentionally cropped by the bottom edge; maintain balanced safe margins on the left and right
+Invariants: preserve the exact lively head tilt, engineering-yellow helmet, small teal brim accent, warm off-white face, dark ears and facial features, soft simplified character geometry, and dark graphite rounded-square tile
+Transparency: make all pixels outside the rounded-square tile genuinely transparent with a clean anti-aliased edge
+Constraints: no character redesign; no color changes; no extra facial features; no body; no clothing; no tools; no text; no watermark; no white fringe; no checkerboard pixels
+Avoid: shrinking the character, excessive top empty space, changing the tilt, gradients, glow, 3D, extra objects, mockup presentation
+
+Final face reveal
+Use case: precise-object-edit
+Asset type: final ForgeSweep Dock/Finder app cover
+Input images: Image 1: edit target
+Primary request: reveal more of the mascot's face from the lower-left corner without enlarging the character
+Placement change: preserve the exact current character scale and clockwise head tilt; move the complete helmet-and-head group upward enough to reveal more lower cheek and chin below the nose; keep the character peeking in from the lower-left with natural cropping at the left edge, but reduce cropping at the bottom
+Face change: add one tiny, simple dark curved mouth directly below the existing nose, matching the sparse friendly style; the mouth must remain clearly visible at 32px
+Invariants: preserve the exact engineering-yellow helmet, ochre grooves, small teal brim accent, off-white bean-shaped face, dark ears/eyes/nose, simplified proportions, dark graphite rounded-square tile, and upper-right negative space
+Transparency: genuine alpha transparency outside the rounded-square tile
+Constraints: do not enlarge or shrink the character; both eyes, nose, mouth, most of the helmet, and teal accent must be visible; no body; no clothes; no tools; no text; no watermark; no extra objects
+Avoid: zooming in, hiding the mouth at the bottom edge, centered upright pose, checkerboard pixels, gradients, glow, 3D, mockup presentation
+
+Menu bar template
+Use case: logo-brand
+Asset type: monochrome macOS menu bar template icon for ForgeSweep
+Input images: Image 1: final character reference only
+Primary request: create a standalone pure-character status-bar glyph from Image 1, removing the rounded-square app-cover background entirely
+Subject: the same simplified construction-helmet field-mouse / mole head, tilted and peeking upward; include the helmet silhouette, two small ears, upper face, two oval eyes, tiny nose, and tiny curved mouth
+Style/medium: minimal native macOS menu bar template glyph; one bold flat black character shape with carefully simplified transparent negative-space details
+Composition/framing: center the complete character glyph in a transparent square canvas, fully contained, occupying about 84 percent of the canvas; use thick shapes optimized for 18x18 pixels
+Color palette: pure opaque black glyph only; all other pixels genuinely transparent
+Constraints: no rounded-square tile; no background plate; no color; no gray; no gradient; no shadow; no fine lines except a clearly readable mouth; no text; no watermark; no extra objects
+Avoid: full app icon, black canvas, checkerboard pixels, construction scene, body, clothing, whiskers, 3D, mockup presentation

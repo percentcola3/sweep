@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>ForgeSweep</string>
+	<key>CFBundleDisplayName</key>
+	<string>ForgeSweep</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.forgesweep.app</string>
+	<key>CFBundleExecutable</key>
+	<string>ForgeSweep</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSUIElement</key>
+	<false/>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>ForgeSweep scans your Desktop to find cleanable files. Scanning is read-only and nothing leaves your Mac.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>ForgeSweep scans your Documents to find cleanable files. Scanning is read-only and nothing leaves your Mac.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>ForgeSweep scans your Downloads to find leftover installers. Scanning is read-only and nothing leaves your Mac.</string>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
+</dict>
+</plist>

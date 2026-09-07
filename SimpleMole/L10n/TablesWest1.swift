@@ -382,7 +382,7 @@ extension L10nTables {
         "clip.empty": "클립보드 기록이 아직 없습니다",
         "clip.hint": "복사한 텍스트와 이미지를 메모리에만 기록합니다——디스크에 저장하지 않습니다.",
         "shot.title": "스크린샷 편집",
-        "shot.hotkey": "스크린샷 단축키（⌘⇧A）",
+        "shot.hotkey": "스크린샷 단축키（⌘⌃A）",
         "shot.save": "저장",
         "shot.saved": "저장됨 ✓",
         "shot.template": "프레임",
@@ -395,7 +395,7 @@ extension L10nTables {
         "tool.text": "텍스트",
         "tool.mosaic": "모자이크",
         "settings.tools": "클립보드와 스크린샷",
-        "settings.tools.hint": "클립보드 기록은 메모리에만 저장됩니다. 스크린샷 단축키는 ⌘⇧A이며 처음 사용 시 화면 기록 권한이 필요합니다."
+        "settings.tools.hint": "클립보드 기록은 메모리에만 저장됩니다. 스크린샷 단축키는 ⌘⌃A이며 처음 사용 시 화면 기록 권한이 필요합니다."
     ]
 
     static let de: [String: String] = [
@@ -777,7 +777,7 @@ extension L10nTables {
         "clip.empty": "Noch keine Zwischenablage-Einträge",
         "clip.hint": "Speichert kopierten Text und Bilder nur im Speicher——nichts wird auf die Festplatte geschrieben.",
         "shot.title": "Screenshot-Editor",
-        "shot.hotkey": "Screenshot-Kurzbefehl（⌘⇧A）",
+        "shot.hotkey": "Screenshot-Kurzbefehl（⌘⌃A）",
         "shot.save": "Sichern",
         "shot.saved": "Gesichert ✓",
         "shot.template": "Rahmen",
@@ -790,7 +790,7 @@ extension L10nTables {
         "tool.text": "Text",
         "tool.mosaic": "Mosaik",
         "settings.tools": "Zwischenablage und Screenshot",
-        "settings.tools.hint": "Der Zwischenablage-Verlauf bleibt im Speicher. Der Screenshot-Kurzbefehl ist ⌘⇧A; beim ersten Mal wird Bildschirmaufnahme-Berechtigung gebraucht."
+        "settings.tools.hint": "Der Zwischenablage-Verlauf bleibt im Speicher. Der Screenshot-Kurzbefehl ist ⌘⌃A; beim ersten Mal wird Bildschirmaufnahme-Berechtigung gebraucht."
     ]
 
     static let fr: [String: String] = [
@@ -1172,7 +1172,7 @@ extension L10nTables {
         "clip.empty": "Aucune entrée pour le moment",
         "clip.hint": "Enregistre les textes et images copiés en mémoire seulement——rien n'est écrit sur le disque.",
         "shot.title": "Éditeur de capture",
-        "shot.hotkey": "Raccourci de capture（⌘⇧A）",
+        "shot.hotkey": "Raccourci de capture（⌘⌃A）",
         "shot.save": "Enregistrer",
         "shot.saved": "Enregistré ✓",
         "shot.template": "Cadre",
@@ -1185,6 +1185,6 @@ extension L10nTables {
         "tool.text": "Texte",
         "tool.mosaic": "Mosaïque",
         "settings.tools": "Presse-papiers et capture",
-        "settings.tools.hint": "L'historique reste en mémoire. Le raccourci de capture est ⌘⇧A ; la première utilisation demande l'autorisation d'enregistrement d'écran."
+        "settings.tools.hint": "L'historique reste en mémoire. Le raccourci de capture est ⌘⌃A ; la première utilisation demande l'autorisation d'enregistrement d'écran."
     ]
 }

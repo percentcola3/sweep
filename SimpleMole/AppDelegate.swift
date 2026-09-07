@@ -60,6 +60,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &observables)
     }
 
+    /// 退出必须无条件放行。系统设置的"退出并重新打开"（屏幕录制授权后的
+    /// 提示按钮）就是一条普通 quit 事件；若在 sheet 呈现期间被 AppKit 否决
+    /// （表现为事件返回 -128"用户已取消"），用户看到的就是"点了没反应"。
+    /// 这里先收起全部 sheet 再返回 .terminateNow，保证任何状态下都能退出。
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        appState.dismissAllSheetsForTermination()
+        return .terminateNow
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         autoCleanupTimer?.invalidate()
         runtimeTimer?.invalidate()

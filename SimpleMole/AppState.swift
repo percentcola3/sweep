@@ -764,7 +764,72 @@ final class AppState: ObservableObject {
     }
 
     func requestScreenRecordingAccess() {
-        _ = permissionCenter.requestScreenRecordingAccess()
+        // 请求 API 负责把 ForgeSweep 注册进屏幕录制列表；系统弹窗之外
+        // 直接把设置面板打开到位，省掉用户再找入口。
+        let granted = permissionCenter.requestScreenRecordingAccess()
+        if granted { return }
+        permissionCenter.openSystemSettings(.screenRecording)
+        log(l10n.t("permissions.screen.restartHint"))
+    }
+
+    /// 屏幕录制授权只对"重启后的进程"生效。重启必须是严格的两段式：
+    /// 先等本进程完全退出，再拉起同一 bundle。三个工程要点：
+    /// 1. helper 按本进程 PID 等待（kill -0），不依赖进程名匹配；
+    /// 2. 退出前先收起 sheet——AppKit 在 sheet 呈现期间可能否决 terminate
+    ///    （表现为 Apple Event quit 返回 -128"用户已取消"）；
+    /// 3. 看门狗兜底：terminate 发出 1.5s 后仍存活则 exit(0) 强制退出。
+    private var relaunchInFlight = false
+
+    func relaunchApplication() {
+        guard !relaunchInFlight else { return }
+        relaunchInFlight = true
+        statusText = l10n.t("status.relaunching")
+        log(l10n.t("status.relaunching"))
+
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let bundlePath = Bundle.main.bundlePath
+        let script = """
+        exec >>/tmp/forgesweep-relaunch.log 2>&1
+        date '+relaunch helper started %H:%M:%S'
+        while kill -0 \(pid) 2>/dev/null; do sleep 0.1; done
+        date '+old instance exited %H:%M:%S'
+        /usr/bin/open \(shellQuoted(bundlePath))
+        date '+reopen issued %H:%M:%S'
+        """
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", script]
+        do {
+            try process.run()
+        } catch {
+            log("relaunch helper failed: \(error.localizedDescription)")
+        }
+        // 先收起所有 sheet，避免 AppKit 在 sheet 期间否决 terminate。
+        showPermissionCenter = false
+        showSettingsSheet = false
+        showAutoCleanupSheet = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            NSApp.terminate(nil)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            // terminate 被任何机制否决时的最终兜底；进程即将退出，
+            // 清理逻辑（子进程组、队列）由各自超时与 fail-closed 边界兜底。
+            exit(0)
+        }
+    }
+
+    private func shellQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// 退出路径统一收口：任何 sheet 都不能在应用退出时存活，
+    /// 否则 AppKit 可能在 sheet 呈现期间否决整个退出。
+    func dismissAllSheetsForTermination() {
+        showPermissionCenter = false
+        showSettingsSheet = false
+        showAutoCleanupSheet = false
+        showWhitelistSheet = false
+        showAutomationSettings = false
     }
 
     // MARK: - 指标

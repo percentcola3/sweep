@@ -90,7 +90,9 @@ struct PermissionCenterView: View {
             secondaryTitle: permissions.fullDiskAccessGranted
                 ? nil : l10n.t("permissions.recheck"),
             secondaryAction: { state.recheckFullDiskAccess() },
-            dragProvider: permissions.fullDiskAccessGranted ? nil : applicationDragProvider)
+            dragProvider: permissions.fullDiskAccessGranted ? nil : applicationDragProvider,
+            dragHint: permissions.fullDiskAccessGranted
+                ? nil : l10n.t("permissions.drag.hint.disk"))
     }
 
     private func applicationDragProvider() -> NSItemProvider {
@@ -100,28 +102,58 @@ struct PermissionCenterView: View {
     }
 
     private var screenRecordingRow: some View {
-        PermissionRow(
-            icon: "rectangle.inset.filled.and.person.filled",
-            title: l10n.t("permissions.screen.title"),
-            detail: l10n.t("permissions.screen.detail"),
-            status: permissions.screenRecordingGranted
-                ? l10n.t("permissions.status.granted")
-                : l10n.t("permissions.status.optional"),
-            statusColor: permissions.screenRecordingGranted ? .green : .secondary,
-            primaryTitle: permissions.screenRecordingGranted
-                ? l10n.t("permissions.openSettings") : l10n.t("permissions.screen.action"),
-            primaryIcon: permissions.screenRecordingGranted ? "gearshape" : "record.circle",
-            primaryProminent: false,
-            primaryAction: {
-                if permissions.screenRecordingGranted {
-                    permissions.openSystemSettings(.screenRecording)
-                } else {
-                    state.requestScreenRecordingAccess()
+        VStack(alignment: .leading, spacing: 6) {
+            PermissionRow(
+                icon: "rectangle.inset.filled.and.person.filled",
+                title: l10n.t("permissions.screen.title"),
+                detail: l10n.t("permissions.screen.detail"),
+                status: permissions.screenRecordingGranted
+                    ? l10n.t("permissions.status.granted")
+                    : l10n.t("permissions.status.optional"),
+                statusColor: permissions.screenRecordingGranted ? .green : .secondary,
+                primaryTitle: permissions.screenRecordingGranted
+                    ? l10n.t("permissions.openSettings") : l10n.t("permissions.screen.action"),
+                primaryIcon: permissions.screenRecordingGranted ? "gearshape" : "record.circle",
+                primaryProminent: false,
+                primaryAction: {
+                    if permissions.screenRecordingGranted {
+                        permissions.openSystemSettings(.screenRecording)
+                    } else {
+                        state.requestScreenRecordingAccess()
+                    }
+                },
+                secondaryTitle: permissions.screenRecordingGranted
+                    ? nil : l10n.t("permissions.openSettings"),
+                secondaryAction: { permissions.openSystemSettings(.screenRecording) },
+                dragProvider: permissions.screenRecordingGranted
+                    ? nil : applicationDragProvider,
+                dragHint: permissions.screenRecordingGranted
+                    ? nil : l10n.t("permissions.drag.hint.screen"))
+
+            // 屏幕录制授权只在新进程生效；授权后必须退出重开，否则快捷键
+            // 一直被 preflight 拦下，看起来像"授权了也没用"。
+            if !permissions.screenRecordingGranted {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.top, 1)
+                    Text(l10n.t("permissions.screen.restartHint"))
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Button {
+                        state.relaunchApplication()
+                    } label: {
+                        Label(l10n.t("permissions.screen.restart"),
+                              systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
                 }
-            },
-            secondaryTitle: permissions.screenRecordingGranted
-                ? nil : l10n.t("permissions.openSettings"),
-            secondaryAction: { permissions.openSystemSettings(.screenRecording) })
+                .padding(.horizontal, 12)
+            }
+        }
     }
 
     private var footer: some View {
@@ -168,55 +200,82 @@ private struct PermissionRow: View {
     var secondaryTitle: String?
     var secondaryAction: (() -> Void)?
     var dragProvider: (() -> NSItemProvider)? = nil
+    /// 拖拽目标提示：授权哪个权限，卡片就指向哪个系统设置列表。
+    var dragHint: String? = nil
 
     var body: some View {
         content
             .modifier(ConditionalDragModifier(provider: dragProvider,
-                                               help: dragProvider == nil ? nil : L10n.shared.t("permissions.drag.help")))
+                                               help: dragProvider == nil ? nil : dragHint))
     }
 
     private var content: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Color.moleAccentText)
-                .frame(width: 34, height: 34)
-                .background(Circle().fill(Color.moleAccent.opacity(0.10)))
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text(title)
-                        .font(.system(size: 12, weight: .semibold))
-                    Text(status)
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(statusColor)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(statusColor.opacity(0.10)))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(Color.moleAccentText)
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(Color.moleAccent.opacity(0.10)))
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 8) {
+                        Text(title)
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(status)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(statusColor)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(statusColor.opacity(0.10)))
+                    }
+                    Text(detail)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Text(detail)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 6) {
+                    if primaryProminent {
+                        Button(action: primaryAction) {
+                            Label(primaryTitle, systemImage: primaryIcon)
+                        }
+                        .buttonStyle(PrimaryButtonStyle())
+                    } else {
+                        Button(action: primaryAction) {
+                            Label(primaryTitle, systemImage: primaryIcon)
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                    }
+                    if let secondaryTitle, let secondaryAction {
+                        Button(secondaryTitle, action: secondaryAction)
+                            .buttonStyle(.plain)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(Color.moleAccentText)
+                    }
+                }
             }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 6) {
-                if primaryProminent {
-                    Button(action: primaryAction) {
-                        Label(primaryTitle, systemImage: primaryIcon)
-                    }
-                    .buttonStyle(PrimaryButtonStyle())
-                } else {
-                    Button(action: primaryAction) {
-                        Label(primaryTitle, systemImage: primaryIcon)
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
+            if dragProvider != nil, let dragHint {
+                // 拖拽能力必须一眼可见：橙色虚线提示条本身就是拖拽目标的一部分。
+                HStack(spacing: 8) {
+                    Image(systemName: "hand.draw.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.orange)
+                    Text(dragHint)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Image(systemName: "plus.square.dashed")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.orange.opacity(0.7))
                 }
-                if let secondaryTitle, let secondaryAction {
-                    Button(secondaryTitle, action: secondaryAction)
-                        .buttonStyle(.plain)
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(Color.moleAccentText)
-                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.orange.opacity(0.06)))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.orange.opacity(0.45),
+                                  style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
             }
         }
         .padding(12)

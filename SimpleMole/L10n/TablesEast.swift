@@ -384,7 +384,7 @@ extension L10nTables {
         "clip.empty": "還沒有剪貼簿記錄",
         "clip.hint": "僅在記憶體中記錄複製的文字與圖片——不會寫入磁碟。",
         "shot.title": "截圖編輯",
-        "shot.hotkey": "截圖快速鍵（⌘⇧A）",
+        "shot.hotkey": "截圖快速鍵（⌘⌃A）",
         "shot.save": "儲存",
         "shot.saved": "已儲存 ✓",
         "shot.template": "相框",
@@ -397,7 +397,7 @@ extension L10nTables {
         "tool.text": "文字",
         "tool.mosaic": "馬賽克",
         "settings.tools": "剪貼簿與截圖",
-        "settings.tools.hint": "剪貼簿歷史僅存於記憶體。截圖快速鍵為 ⌘⇧A，首次使用需螢幕錄製權限。"
+        "settings.tools.hint": "剪貼簿歷史僅存於記憶體。截圖快速鍵為 ⌘⌃A，首次使用需螢幕錄製權限。"
     ]
 
     static let ja: [String: String] = [
@@ -779,7 +779,7 @@ extension L10nTables {
         "clip.empty": "クリップボードの記録はまだありません",
         "clip.hint": "コピーしたテキストと画像をメモリ内にのみ記録します——ディスクには書き込みません。",
         "shot.title": "スクリーンショット編集",
-        "shot.hotkey": "スクリーンショットのホットキー（⌘⇧A）",
+        "shot.hotkey": "スクリーンショットのホットキー（⌘⌃A）",
         "shot.save": "保存",
         "shot.saved": "保存済み ✓",
         "shot.template": "フレーム",
@@ -792,6 +792,6 @@ extension L10nTables {
         "tool.text": "テキスト",
         "tool.mosaic": "モザイク",
         "settings.tools": "クリップボードとスクリーンショット",
-        "settings.tools.hint": "クリップボード履歴はメモリ内のみ。スクリーンショットのホットキーは ⌘⇧A で、初回は画面収録権限が必要です。"
+        "settings.tools.hint": "クリップボード履歴はメモリ内のみ。スクリーンショットのホットキーは ⌘⌃A で、初回は画面収録権限が必要です。"
     ]
 }

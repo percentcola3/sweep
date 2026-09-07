@@ -11,7 +11,7 @@ final class HotKeyCenter {
 
     @discardableResult
     func register(keyCode: UInt32 = UInt32(kVK_ANSI_A),
-                  modifiers: UInt32 = UInt32(cmdKey | shiftKey),
+                  modifiers: UInt32 = UInt32(cmdKey | controlKey),
                   handler: @escaping () -> Void) -> Bool {
         unregister()
         if eventHandlerRef == nil {

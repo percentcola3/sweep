@@ -283,6 +283,7 @@ enum L10nTables {
         "status.cleanupDone": "Cleanup done · %d items handled",
         "status.cleanupPartial": "Partially failed · %d handled, %d failed — see log",
         "status.systemScanning": "Requesting admin rights and scanning system items…",
+        "status.relaunching": "Restarting ForgeSweep…",
         "status.systemDone": "System scan done · check items to clean",
         "status.systemEmpty": "No cleanable system items found",
         "status.systemCleaning": "Running system cleanup…",
@@ -534,7 +535,7 @@ enum L10nTables {
         "clip.empty": "No clipboard entries yet",
         "clip.hint": "Records copied text and images in memory only — nothing is written to disk.",
         "shot.title": "Screenshot Editor",
-        "shot.hotkey": "Screenshot hotkey (⌘⇧A)",
+        "shot.hotkey": "Screenshot hotkey (⌘⌃A)",
         "shot.save": "Save",
         "shot.saved": "Saved ✓",
         "shot.template": "Frame",
@@ -547,7 +548,7 @@ enum L10nTables {
         "tool.text": "Text",
         "tool.mosaic": "Mosaic",
         "settings.tools": "Clipboard & Screenshot",
-        "settings.tools.hint": "Clipboard history keeps text, URLs, files and images in memory only. The screenshot hotkey is ⌘⇧A and needs Screen Recording permission on first use."
+        "settings.tools.hint": "Clipboard history keeps text, URLs, files and images in memory only. The screenshot hotkey is ⌘⌃A and needs Screen Recording permission on first use."
     ]
 
     static let zhHans: [String: String] = [
@@ -815,6 +816,7 @@ enum L10nTables {
         "status.cleanupDone": "清理完成 · 已处理 %d 项",
         "status.cleanupPartial": "清理部分失败 · 已处理 %d 项，%d 项失败，请查看日志",
         "status.systemScanning": "正在请求管理员权限并扫描系统项目…",
+        "status.relaunching": "正在重启 ForgeSweep…",
         "status.systemDone": "系统扫描完成 · 可勾选后清理",
         "status.systemEmpty": "没有发现可清理的系统项目",
         "status.systemCleaning": "正在执行系统清理…",
@@ -1062,7 +1064,7 @@ enum L10nTables {
         "clip.empty": "还没有剪贴板记录",
         "clip.hint": "仅记录复制的文本与图片，只保存在内存中——不会写入磁盘。",
         "shot.title": "截图编辑",
-        "shot.hotkey": "截图快捷键（⌘⇧A）",
+        "shot.hotkey": "截图快捷键（⌘⌃A）",
         "shot.save": "保存",
         "shot.saved": "已保存 ✓",
         "shot.template": "相框",
@@ -1075,6 +1077,6 @@ enum L10nTables {
         "tool.text": "文字",
         "tool.mosaic": "马赛克",
         "settings.tools": "剪贴板与截图",
-        "settings.tools.hint": "剪贴板历史支持文本、网址、文件和图片，仅保存在内存中。截图快捷键为 ⌘⇧A，首次使用需要屏幕录制权限。"
+        "settings.tools.hint": "剪贴板历史支持文本、网址、文件和图片，仅保存在内存中。截图快捷键为 ⌘⌃A，首次使用需要屏幕录制权限。"
     ]
 }

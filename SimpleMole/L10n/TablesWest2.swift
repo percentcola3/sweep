@@ -382,7 +382,7 @@ extension L10nTables {
         "clip.empty": "Aún no hay entradas del portapapeles",
         "clip.hint": "Registra texto e imágenes copiados solo en memoria——nada se escribe al disco.",
         "shot.title": "Editor de captura",
-        "shot.hotkey": "Atajo de captura（⌘⇧A）",
+        "shot.hotkey": "Atajo de captura（⌘⌃A）",
         "shot.save": "Guardar",
         "shot.saved": "Guardado ✓",
         "shot.template": "Marco",
@@ -395,7 +395,7 @@ extension L10nTables {
         "tool.text": "Texto",
         "tool.mosaic": "Mosaico",
         "settings.tools": "Portapapeles y captura",
-        "settings.tools.hint": "El historial queda solo en memoria. El atajo de captura es ⌘⇧A y el primer uso necesita permiso de grabación de pantalla."
+        "settings.tools.hint": "El historial queda solo en memoria. El atajo de captura es ⌘⌃A y el primer uso necesita permiso de grabación de pantalla."
     ]
 
     static let pt: [String: String] = [
@@ -777,7 +777,7 @@ extension L10nTables {
         "clip.empty": "Ainda não há registros da área de transferência",
         "clip.hint": "Registra texto e imagens copiados apenas na memória——nada é gravado no disco.",
         "shot.title": "Editor de captura de tela",
-        "shot.hotkey": "Atalho de captura（⌘⇧A）",
+        "shot.hotkey": "Atalho de captura（⌘⌃A）",
         "shot.save": "Salvar",
         "shot.saved": "Salvo ✓",
         "shot.template": "Moldura",
@@ -790,7 +790,7 @@ extension L10nTables {
         "tool.text": "Texto",
         "tool.mosaic": "Mosaico",
         "settings.tools": "Área de transferência e captura",
-        "settings.tools.hint": "O histórico fica só na memória. O atalho de captura é ⌘⇧A e o primeiro uso pede permissão de gravação de tela."
+        "settings.tools.hint": "O histórico fica só na memória. O atalho de captura é ⌘⌃A e o primeiro uso pede permissão de gravação de tela."
     ]
 
     static let it: [String: String] = [
@@ -1172,7 +1172,7 @@ extension L10nTables {
         "clip.empty": "Nessuna voce degli appunti ancora",
         "clip.hint": "Registra testo e immagini copiati solo in memoria——nulla viene scritto su disco.",
         "shot.title": "Editor di screenshot",
-        "shot.hotkey": "Scorciatoia screenshot（⌘⇧A）",
+        "shot.hotkey": "Scorciatoia screenshot（⌘⌃A）",
         "shot.save": "Salva",
         "shot.saved": "Salvato ✓",
         "shot.template": "Cornice",
@@ -1185,7 +1185,7 @@ extension L10nTables {
         "tool.text": "Testo",
         "tool.mosaic": "Mosaico",
         "settings.tools": "Appunti e screenshot",
-        "settings.tools.hint": "La cronologia resta solo in memoria. La scorciatoia screenshot è ⌘⇧A; il primo uso richiede il permesso di registrazione schermo."
+        "settings.tools.hint": "La cronologia resta solo in memoria. La scorciatoia screenshot è ⌘⌃A; il primo uso richiede il permesso di registrazione schermo."
     ]
 
     static let ru: [String: String] = [
@@ -1567,7 +1567,7 @@ extension L10nTables {
         "clip.empty": "Записей буфера обмена пока нет",
         "clip.hint": "Записывает скопированные текст и изображения только в память——на диск ничего не пишется.",
         "shot.title": "Редактор скриншотов",
-        "shot.hotkey": "Горячая клавиша скриншота（⌘⇧A）",
+        "shot.hotkey": "Горячая клавиша скриншота（⌘⌃A）",
         "shot.save": "Сохранить",
         "shot.saved": "Сохранено ✓",
         "shot.template": "Рамка",
@@ -1580,7 +1580,7 @@ extension L10nTables {
         "tool.text": "Текст",
         "tool.mosaic": "Мозаика",
         "settings.tools": "Буфер обмена и скриншоты",
-        "settings.tools.hint": "История хранится только в памяти. Горячая клавиша скриншота — ⌘⇧A; при первом использовании нужно разрешение на запись экрана."
+        "settings.tools.hint": "История хранится только в памяти. Горячая клавиша скриншота — ⌘⌃A; при первом использовании нужно разрешение на запись экрана."
     ]
 
     static let tr: [String: String] = [
@@ -1962,7 +1962,7 @@ extension L10nTables {
         "clip.empty": "Henüz pano kaydı yok",
         "clip.hint": "Kopyalanan metin ve görselleri yalnızca bellekte tutar——diske hiçbir şey yazılmaz.",
         "shot.title": "Ekran Görüntüsü Düzenleyici",
-        "shot.hotkey": "Ekran görüntüsü kısayolu（⌘⇧A）",
+        "shot.hotkey": "Ekran görüntüsü kısayolu（⌘⌃A）",
         "shot.save": "Kaydet",
         "shot.saved": "Kaydedildi ✓",
         "shot.template": "Çerçeve",
@@ -1975,6 +1975,6 @@ extension L10nTables {
         "tool.text": "Metin",
         "tool.mosaic": "Mozaik",
         "settings.tools": "Pano ve ekran görüntüsü",
-        "settings.tools.hint": "Geçmiş yalnızca bellekte tutulur. Ekran görüntüsü kısayolu ⌘⇧A'tir; ilk kullanımda ekran kaydı izni gerekir."
+        "settings.tools.hint": "Geçmiş yalnızca bellekte tutulur. Ekran görüntüsü kısayolu ⌘⌃A'tir; ilk kullanımda ekran kaydı izni gerekir."
     ]
 }

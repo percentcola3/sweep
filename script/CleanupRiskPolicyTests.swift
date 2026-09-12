@@ -25,6 +25,8 @@ struct CleanupRiskPolicyTests {
         try testAutomationProtection(home: policyHome)
         try testCacheRoundTrip(fixture: fixture)
         try testSystemDataParsing()
+        try testNetmonParsing()
+        try testCacheMapPolicy(home: policyHome)
     }
 
     private static func expect(_ condition: @autoclosure () -> Bool,
@@ -85,8 +87,9 @@ struct CleanupRiskPolicyTests {
                    "container-owned cache did not retain its Bundle guard")
         try expect(supportCache.risk == .safe && supportCache.activityGuard == .openFile,
                    "explicit Application Support cache subtree was not Safe")
-        try expect(loginData.risk == .warning,
-                   "browser login database was incorrectly marked Safe")
+        // 缓存地图：登录数据库属于持久用户数据，保护级别高于旧的 Warning。
+        try expect(loginData.risk == .protected,
+                   "browser login database was not Protected")
 
         let parserHome = NSHomeDirectory()
         let parserSafePath = parserHome + "/Library/Caches/com.example.tool/cache.db"
@@ -151,7 +154,7 @@ struct CleanupRiskPolicyTests {
                    project.applyRoute == .projectArtifactTrash,
                    "project mapping is not Warning/project route")
 
-        let npmPath = NSHomeDirectory() + "/.npm"
+        let npmPath = NSHomeDirectory() + "/.npm/_cacache"
         let developer = try unwrap(
             Parsers.specialCategories("42\tnpm cache\t\(npmPath)", family: .dev).first,
             "developer category")
@@ -546,10 +549,15 @@ struct CleanupRiskPolicyTests {
                    "empty cleanup result was not persisted")
 
         var json = try String(contentsOf: cacheURL, encoding: .utf8)
-        // 把任意版本号降级为 10：测试不应与 CleanupCache.version 常量漂移耦合。
-        if let marker = json.range(of: "\"version\":"),
-           let comma = json[marker.upperBound...].firstIndex(of: ",") {
-            json.replaceSubrange(marker.upperBound..<comma, with: "10")
+        // 把任意版本号降级为 10：测试不应与 CleanupCache.version 常量或
+        // JSONEncoder 的键序实现漂移耦合（version 可能是最后一个键，后面
+        // 紧跟 `}` 而不是 `,`），所以匹配到键名后吞掉整段连续数字。
+        if let marker = json.range(of: "\"version\":") {
+            var valueEnd = marker.upperBound
+            while valueEnd < json.endIndex, json[valueEnd].isNumber {
+                valueEnd = json.index(after: valueEnd)
+            }
+            json.replaceSubrange(marker.upperBound..<valueEnd, with: "10")
         }
         try Data(json.utf8).write(to: cacheURL, options: .atomic)
         try expect(CleanupCache.restore(from: cacheURL) == nil,
@@ -593,6 +601,181 @@ struct CleanupRiskPolicyTests {
                    "system apply summary was parsed incorrectly")
         try expect(Parsers.systemDataEntries("").isEmpty,
                    "empty system preview produced entries")
+    }
+
+    private static func testNetmonParsing() throws {
+        // bytes：comm 含空格、pid 非法行丢弃。
+        let samples = Parsers.netmonProcessSamples([
+            "proc\t123\t100\t200\tGoogle Chrome Helper",
+            "proc\t0\t1\t2\tkernel",
+            "proc\t-5\t1\t2\tnegative",
+            "proc\t42\tabc\t2\tbadbytes",
+            "flow\t1\tx\tTCP\ta\tb",
+            "garbage",
+        ].joined(separator: "\n"))
+        try expect(samples.count == 1,
+                   "netmon bytes parser accepted invalid rows")
+        try expect(samples[0] == NetmonProcessSample(pid: 123, bytesIn: 100,
+                                                      bytesOut: 200,
+                                                      command: "Google Chrome Helper"),
+                   "netmon bytes row with spaced comm was parsed incorrectly")
+
+        // flows：恰好六列且 remote 非空才收。
+        let flows = Parsers.netmonFlows([
+            "flow\t1131\tD-Chat\tTCP\t172.29.40.26:1\t221.229.52.251:80",
+            "flow\t1131\tD-Chat\tUDP\t[fe80::1]:1\t[2606:4700::1]:443",
+            "flow\t999\tNoRemote\tTCP\t1.2.3.4:5\t",
+            "flow\t0\tZero\tTCP\ta\tb",
+            "proc\t1\tx\tTCP\ta\tb",
+        ].joined(separator: "\n"))
+        try expect(flows.count == 2, "netmon flows parser accepted invalid rows")
+        try expect(flows[0].proto == "TCP"
+                   && flows[1].remote == "[2606:4700::1]:443" && flows[1].proto == "UDP",
+                   "flow protocol or IPv6 endpoint was parsed incorrectly")
+
+        // routes + discover。
+        let routes = Parsers.netmonRoutes([
+            "route\t8.8.8.8\ten0",
+            "route\t2606:4700::1\tunknown",
+            "route\t\ten0",
+        ].joined(separator: "\n"))
+        try expect(routes.count == 2 && routes[1].interface == "unknown",
+                   "netmon routes were parsed incorrectly")
+        let discovery = Parsers.clashDiscovery([
+            "endpoint\tunix:/tmp/verge/verge-mihomo.sock",
+            "endpoint\thttp://127.0.0.1:9097",
+            "secret\tabcd",
+            "mixedport\t7897",
+            "proxyport\t7897",
+            "proxyport\t7891",
+            "proxyport\t7890",
+            "mixedport\t7898",
+            "mixedport\tnotanumber",
+            "proxyport\t0",
+            "proxyport\t65536",
+        ].joined(separator: "\n"))
+        try expect(discovery.endpoints == ["unix:/tmp/verge/verge-mihomo.sock",
+                                           "http://127.0.0.1:9097"]
+                   && discovery.secret == "abcd" && discovery.mixedPort == 7897
+                   && discovery.proxyPorts == [7897, 7891, 7890, 7898],
+                   "clash discovery was parsed incorrectly")
+        let socksOnly = Parsers.clashDiscovery("proxyport\t7891")
+        try expect(socksOnly.mixedPort == nil && socksOnly.proxyPorts == [7891],
+                   "a SOCKS-only listener was mislabeled as the mixed port")
+
+        // Clash /connections：DIRECT 链、节点链、null 连接列表。
+        let directJSON = #"{"downloadTotal":10,"uploadTotal":5,"connections":[{"id":"c1","metadata":{"network":"tcp","type":"HTTP","sourceIP":"127.0.0.1","sourcePort":"1","destinationIP":"1.2.3.4","destinationPort":"443","host":"example.com","process":"Chrome","processPath":"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"},"upload":1,"download":2,"start":"2026-09-12T10:00:00.000000+08:00","chains":["DIRECT"],"rule":"Match","rulePayload":""}]}"#
+        let direct = try unwrap(ClashAPI.connections(from: Data(directJSON.utf8)),
+                                "clash direct payload")
+        try expect(direct.downloadTotal == 10 && direct.uploadTotal == 5,
+                   "clash totals were parsed incorrectly")
+        try expect(direct.connections?.count == 1
+                   && direct.connections?[0].isDirectExit == true,
+                   "clash DIRECT chain was not detected")
+        let nodeJSON = #"{"downloadTotal":0,"uploadTotal":0,"connections":[{"id":"c2","metadata":{"destinationIP":"5.6.7.8","destinationPort":"443"},"upload":0,"download":0,"start":"","chains":["PROXY","HK-Node"],"rule":"DOMAIN-SUFFIX,example.com"}]}"#
+        let node = try unwrap(ClashAPI.connections(from: Data(nodeJSON.utf8)),
+                              "clash node payload")
+        try expect(node.connections?[0].isDirectExit == false,
+                   "clash node chain was misclassified as DIRECT")
+        let numericPortJSON = #"{"downloadTotal":0,"uploadTotal":0,"connections":[{"id":"c3","metadata":{"sourcePort":51234,"destinationPort":443},"upload":0,"download":0,"start":""}]}"#
+        let numericPorts = try unwrap(ClashAPI.connections(from: Data(numericPortJSON.utf8)),
+                                      "clash numeric port payload")
+        try expect(numericPorts.connections?[0].metadata.sourcePort == "51234"
+                   && numericPorts.connections?[0].metadata.destinationPort == "443",
+                   "numeric Clash ports were not normalized to strings")
+        let empty = try unwrap(ClashAPI.connections(
+            from: Data(#"{"downloadTotal":0,"uploadTotal":0,"connections":null,"memory":1}"#.utf8)),
+            "clash empty payload")
+        try expect(empty.connections == nil && empty.downloadTotal == 0,
+                   "clash null connections list was rejected")
+        try expect(ClashAPI.connections(from: Data("Unauthorized".utf8)) == nil,
+                   "clash non-JSON body was decoded")
+    }
+
+    private static func testCacheMapPolicy(home: String) throws {
+        let appSupport = home + "/Library/Application Support"
+        // 浏览器 Service Worker：整个目录 Safe + browser 守卫。
+        for browser in ["Google/Chrome/Default", "Microsoft Edge/Default",
+                        "BraveSoftware/Brave-Browser/Default", "Arc/User Data/Default"] {
+            let sw = CleanupRiskPolicy.core(section: "Browsers",
+                                            path: appSupport + "/\(browser)/Service Worker",
+                                            homeDirectory: home)
+            try expect(sw.risk == .safe && sw.activityGuard == .browser,
+                       "\(browser) Service Worker was not Safe with a browser guard")
+        }
+        // ChromeDebug 整目录可重建。
+        let debug = CleanupRiskPolicy.core(section: "Browsers",
+                                           path: appSupport + "/Google/ChromeDebug",
+                                           homeDirectory: home)
+        try expect(debug.risk == .safe && debug.activityGuard == .browser,
+                   "ChromeDebug profile was not Safe")
+        // 持久用户数据：登录态/站点存储一律 Protected。
+        for leaf in ["IndexedDB", "Local Storage", "Login Data", "Cookies", "Preferences"] {
+            let durable = CleanupRiskPolicy.core(section: "Browsers",
+                                                 path: appSupport + "/Google/Chrome/Default/\(leaf)",
+                                                 homeDirectory: home)
+            try expect(durable.risk == .protected,
+                       "Chrome durable leaf \(leaf) was not Protected")
+        }
+        // Telegram：media 可清，db 与其余目录受保护。
+        let telegram = home + "/Library/Group Containers/6N38VWS5BX.ru.keepcoder.Telegram"
+        let media = CleanupRiskPolicy.core(section: "IM",
+                                           path: telegram + "/account-3/postbox/media",
+                                           homeDirectory: home)
+        try expect(media.risk == .safe && media.activityGuard == .messenger,
+                   "Telegram media cache was not Safe with a messenger guard")
+        for protected in [telegram + "/account-3/postbox/db", telegram + "/account-3"] {
+            try expect(CleanupRiskPolicy.core(section: "IM", path: protected,
+                                              homeDirectory: home).risk == .protected,
+                       "Telegram durable path was not Protected")
+        }
+        // 飞书：profile_explorer 可清；sdk_storage / profile_main 受保护。
+        let lark = appSupport + "/LarkShell"
+        let explorer = CleanupRiskPolicy.core(section: "IM",
+                                              path: lark + "/aha/users/700123/profile_explorer",
+                                              homeDirectory: home)
+        try expect(explorer.risk == .safe && explorer.activityGuard == .messenger,
+                   "Lark profile_explorer was not Safe with a messenger guard")
+        for protected in [lark + "/sdk_storage", lark + "/aha/users/700123/profile_main"] {
+            try expect(CleanupRiskPolicy.core(section: "IM", path: protected,
+                                              homeDirectory: home).risk == .protected,
+                       "Lark durable path was not Protected")
+        }
+        // 禁止清单：钥匙串。
+        try expect(CleanupRiskPolicy.isProtectedContent(home + "/Library/Keychains",
+                                                        homeDirectory: home),
+                   "Keychains was not protected content")
+
+        // 运行态守卫：Telegram 运行中，媒体缓存升级为 Protected 且清空选择。
+        let runningTelegram = RunningApplicationSnapshot(
+            bundleIdentifiers: ["ru.keepcoder.Telegram"])
+        let mediaCategory = CleanupCategory(
+            name: "Telegram Media Cache",
+            paths: [telegram + "/account-3/postbox/media"],
+            bytes: 1024, selected: true,
+            source: media.source, risk: media.risk,
+            disposal: media.disposal, applyRoute: media.applyRoute,
+            activityGuard: media.activityGuard, reasonKey: media.reasonKey)
+        try expect(CleanupRiskPolicy.reassess(mediaCategory, running: runningTelegram,
+                                              homeDirectory: home).risk == .protected,
+                   "running Telegram did not protect its media cache")
+        let subset = CleanupRiskPolicy.runtimeEligibleSubset(mediaCategory,
+                                                             running: runningTelegram,
+                                                             homeDirectory: home)
+        try expect(subset?.selectedPathCount == 0,
+                   "running Telegram kept its cache selected")
+        // Brave 运行中 → 浏览器守卫同样拦截。
+        let runningBrave = RunningApplicationSnapshot(processNames: ["Brave Browser"])
+        let braveSW = CleanupCategory(
+            name: "Brave Service Worker",
+            paths: [appSupport + "/BraveSoftware/Brave-Browser/Default/Service Worker"],
+            bytes: 1, selected: true,
+            source: .core, risk: .safe, disposal: .trash,
+            applyRoute: .genericTrash, activityGuard: .browser,
+            reasonKey: "cleanup.risk.rebuildableCache")
+        try expect(CleanupRiskPolicy.reassess(braveSW, running: runningBrave,
+                                              homeDirectory: home).risk == .protected,
+                   "running Brave did not protect its Service Worker")
     }
 
     private static func unwrap<T>(_ value: T?, _ name: String) throws -> T {

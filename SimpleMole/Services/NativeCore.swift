@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import Foundation
+import OSLog
 
 /// Thread-safe sink used by the native scanner to publish lightweight progress
 /// without coupling the filesystem worker to the UI actor.
@@ -56,6 +57,7 @@ final class NativeCore: @unchecked Sendable {
         let skipped: Int
         let failed: Int
         let messages: [String]
+        var removedPaths: Set<String> = []
 
         var succeeded: Bool { failed == 0 }
     }
@@ -81,6 +83,7 @@ final class NativeCore: @unchecked Sendable {
         let finishedAt: Date
     }
 
+    private static let cleanupLogger = Logger(subsystem: "com.forgesweep.app", category: "cleanup")
     private let fileManager = FileManager.default
     private let sizeKeys: Set<URLResourceKey> = [
         .isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey,
@@ -153,7 +156,21 @@ final class NativeCore: @unchecked Sendable {
                                                           homeDirectory: homeDirectory)
                         descriptor = entry.deletingLastPathComponent().path == home.path + "/.Trash"
                             && base.risk != .protected ? CleanupRiskPolicy.recommendedTrash() : base
-                        name = label
+                        if broadRoots.contains(root.path), root.lastPathComponent != ".Trash" {
+                            let identifier = entry.lastPathComponent
+                            let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: identifier)
+                            name = app?.deletingPathExtension().lastPathComponent ?? identifier
+                        } else {
+                            let supportPrefix = home.path + "/Library/Application Support/"
+                            let cachePrefix = home.path + "/Library/Caches/"
+                            if path.hasPrefix(supportPrefix) {
+                                name = String(path.dropFirst(supportPrefix.count).split(separator: "/").first ?? "")
+                            } else if path.hasPrefix(cachePrefix) {
+                                name = String(path.dropFirst(cachePrefix.count).split(separator: "/").first ?? "")
+                            } else {
+                                name = label
+                            }
+                        }
                     }
                     // Classify first: sessions, models and unverified roots do
                     // not consume the quick scan's I/O budget.
@@ -327,10 +344,8 @@ final class NativeCore: @unchecked Sendable {
             "Simulator Caches", .developerCache, .simulator)
         add(home.appendingPathComponent(".cache", isDirectory: true),
             "User Cache", .core, .openFile)
-        add(home.appendingPathComponent(".npm", isDirectory: true),
+        add(home.appendingPathComponent(".npm/_cacache", isDirectory: true),
             "npm Cache", .developerCache, .packageManager)
-        add(home.appendingPathComponent(".pnpm-store", isDirectory: true),
-            "pnpm Cache", .developerCache, .packageManager)
         add(home.appendingPathComponent(".yarn/cache", isDirectory: true),
             "Yarn Cache", .developerCache, .packageManager)
         add(home.appendingPathComponent(".bun/install/cache", isDirectory: true),
@@ -355,8 +370,6 @@ final class NativeCore: @unchecked Sendable {
             "Carthage Cache", .developerCache, .packageManager)
         add(home.appendingPathComponent("go/pkg/mod/cache", isDirectory: true),
             "Go Module Cache", .developerCache, .packageManager)
-        add(home.appendingPathComponent("Library/pnpm/store", isDirectory: true),
-            "pnpm Store", .developerCache, .packageManager)
         add(home.appendingPathComponent(".Trash", isDirectory: true),
             "Trash", .core, .openFile)
 
@@ -391,6 +404,50 @@ final class NativeCore: @unchecked Sendable {
         for (relative, label) in developerCaches {
             add(home.appendingPathComponent(relative, isDirectory: true),
                 label, .developerCache, .packageManager)
+        }
+
+        // 缓存地图：大体积、可重建的应用级缓存。发现层只负责枚举形状
+        // （浏览器各 profile、Telegram 各账号、飞书各用户），风险与守卫
+        // 由 CleanupRiskPolicy 的知识库裁决；禁区路径不会出现在这里。
+        let appSupport = home.appendingPathComponent("Library/Application Support",
+                                                     isDirectory: true)
+        let browserProfileParents: [(String, String)] = [
+            ("Google/Chrome", "Chrome Service Worker"),
+            ("Microsoft Edge", "Edge Service Worker"),
+            ("BraveSoftware/Brave-Browser", "Brave Service Worker"),
+            ("Arc/User Data", "Arc Service Worker")
+        ]
+        for (relative, label) in browserProfileParents {
+            let parentURL = appSupport.appendingPathComponent(relative, isDirectory: true)
+            guard !control.shouldStop, cleanupPathIsPhysical(parentURL, home: home) else { continue }
+            for profile in directChildren(of: parentURL)
+                where !isSymlink(profile) && isDirectory(profile) {
+                add(profile.appendingPathComponent("Service Worker", isDirectory: true),
+                    label, .core, .browser)
+            }
+        }
+        // 自动化调试的独立 user-data-dir，整个目录可再生。
+        add(appSupport.appendingPathComponent("Google/ChromeDebug", isDirectory: true),
+            "ChromeDebug Profile", .core, .browser)
+        // Telegram 媒体缓存：每个账号一条（老的账号往往最大）；postbox/db
+        // 是消息数据库，由策略知识库保护，不会进入发现层。
+        let telegramRoot = home.appendingPathComponent(
+            "Library/Group Containers/6N38VWS5BX.ru.keepcoder.Telegram", isDirectory: true)
+        if cleanupPathIsPhysical(telegramRoot, home: home) {
+            for account in directChildren(of: telegramRoot)
+                where account.lastPathComponent.hasPrefix("account-") && !isSymlink(account) {
+                add(account.appendingPathComponent("postbox/media", isDirectory: true),
+                    "Telegram Media Cache", .core, .messenger)
+            }
+        }
+        // 飞书文档预览缓存：多账号各自堆积，只认 profile_explorer。
+        let larkUsers = appSupport.appendingPathComponent("LarkShell/aha/users",
+                                                          isDirectory: true)
+        if cleanupPathIsPhysical(larkUsers, home: home) {
+            for user in directChildren(of: larkUsers) where !isSymlink(user) {
+                add(user.appendingPathComponent("profile_explorer", isDirectory: true),
+                    "Lark Doc Cache", .core, .messenger)
+            }
         }
 
         // Common IM clients keep disposable thumbnails and web caches in
@@ -537,7 +594,13 @@ final class NativeCore: @unchecked Sendable {
         var skipped = 0
         var failed = 0
         var messages: [String] = []
+        let probeStart = Date()
+        var removedPaths = Set<String>()
+        Self.cleanupLogger.notice("Open-file safety check started")
         let openFiles = openFileSnapshot()
+        let probeSeconds = Date().timeIntervalSince(probeStart)
+        Self.cleanupLogger.notice("Open-file safety check finished in \(probeSeconds, privacy: .public)s; available=\(openFiles != nil, privacy: .public)")
+        messages.append(String(format: "Open-file check %.2fs; available=%@", probeSeconds, openFiles == nil ? "no" : "yes"))
 
         let nonOverlapping = DeletionPlan.nonOverlappingPaths(items.map(\.record))
         let itemByRecord = Dictionary(items.map { ($0.record, $0) },
@@ -590,13 +653,14 @@ final class NativeCore: @unchecked Sendable {
                     try fileManager.trashItem(at: url, resultingItemURL: &resultingURL)
                 }
                 removed += 1
+                removedPaths.insert(rawPath)
             } catch {
                 failed += 1
                 messages.append("Failed to remove \(path): \(error.localizedDescription)")
             }
         }
         return ApplySummary(removed: removed, skipped: skipped,
-                            failed: failed, messages: messages)
+                            failed: failed, messages: messages, removedPaths: removedPaths)
     }
 
     // MARK: Analyze
@@ -1145,21 +1209,8 @@ final class NativeCore: @unchecked Sendable {
     private func openFileSnapshot() -> Set<String>? {
         let executable = "/usr/sbin/lsof"
         guard fileManager.isExecutableFile(atPath: executable) else { return nil }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = ["-nP", "-F", "n", "-a", "-u", NSUserName()]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return nil
-        }
-        guard process.terminationStatus == 0 else { return nil }
-        guard let data = try? pipe.fileHandleForReading.readToEnd(),
-              let text = String(data: data, encoding: .utf8) else { return nil }
+        guard let text = SystemMetrics.commandOutput(executable,
+            arguments: ["-O", "-nP", "-F", "n", "-a", "-u", NSUserName()]) else { return nil }
         return Set(text.split(whereSeparator: \.isNewline).compactMap { line in
             guard line.first == "n" else { return nil }
             let path = String(line.dropFirst())

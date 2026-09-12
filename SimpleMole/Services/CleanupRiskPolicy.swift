@@ -67,6 +67,11 @@ enum CleanupRiskPolicy {
         }
 
         let home = normalize(homeDirectory)
+
+        if let knowledgeDescriptor = appCacheKnowledgeDescriptor(normalized, home: home) {
+            return knowledgeDescriptor
+        }
+
         let trashRoot = home + "/.Trash"
         if isDirectChild(normalized, of: trashRoot) {
             // `Parsers` promotes ordinary top-level Trash entries for the
@@ -425,6 +430,109 @@ enum CleanupRiskPolicy {
                                  reasonKey: "cleanup.risk.deviceSupport")
     }
 
+    // MARK: - 缓存地图（macOS 应用缓存知识库）
+    //
+    // 每条规则来自实际清理审计：是什么、能否重建、删除前提、连带禁区。
+    // 地图上没有的路径保持默认 Warning——查清楚之前不动。
+
+    /// Chromium 系浏览器的 profile 根（Application Support 下相对路径）。
+    /// ChromeDebug 是自动化调试用独立 user-data-dir，整个目录可重建。
+    private static let browserProfileRelativeRoots = [
+        "Google/Chrome",
+        "Google/ChromeDebug",
+        "Microsoft Edge",
+        "BraveSoftware/Brave-Browser",
+        "Arc/User Data"
+    ]
+
+    /// 浏览器 profile 内的持久用户数据：登录态、站点数据库、偏好、书签。
+    /// 与 Service Worker 同级共存，误删等于丢登录态。
+    private static let durableBrowserComponents: Set<String> = [
+        "indexeddb", "local storage", "login data", "login data for account",
+        "cookies", "cookies-journal", "preferences", "secure preferences",
+        "bookmarks", "bookmarks.bak", "web data", "sessions", "databases"
+    ]
+
+    private static let telegramGroupRootName = "6N38VWS5BX.ru.keepcoder.Telegram"
+    private static let larkShellRelativeRoot = "LarkShell"
+
+    /// 缓存地图裁决：命中返回描述符，未命中返回 nil 走通用规则。
+    /// 顺序即优先级：禁区先于可清项。
+    static func appCacheKnowledgeDescriptor(_ path: String, home: String) -> CleanupPolicyDescriptor? {
+        let appSupport = home + "/Library/Application Support/"
+        let groupContainers = home + "/Library/Group Containers/"
+
+        // --- Telegram：只有 account-*/postbox/media 是可再生媒体缓存。
+        // postbox/db 是本地消息数据库，其余目录同样是聊天数据。
+        let telegramPrefix = groupContainers + telegramGroupRootName + "/"
+        if path == groupContainers + telegramGroupRootName
+            || path.hasPrefix(telegramPrefix) {
+            let components = path == groupContainers + telegramGroupRootName
+                ? [] : splitComponents(String(path.dropFirst(telegramPrefix.count)))
+            if components.count == 3,
+               components[0].hasPrefix("account-"),
+               components[1] == "postbox",
+               components[2] == "media" {
+                return .init(source: .core, risk: .safe, disposal: .trash,
+                              applyRoute: .genericTrash, activityGuard: .messenger,
+                              reasonKey: "cleanup.risk.messengerCache")
+            }
+            return protectedDescriptor(source: .core, reasonKey: "cleanup.risk.durableIMData")
+        }
+
+        // --- 飞书：只认 aha/users/<id>/profile_explorer（文档预览缓存）。
+        // sdk_storage/database 是消息数据，profile_main 里有登录态。
+        let larkPrefix = appSupport + larkShellRelativeRoot + "/"
+        if path == appSupport + larkShellRelativeRoot || path.hasPrefix(larkPrefix) {
+            let components = path == appSupport + larkShellRelativeRoot
+                ? [] : splitComponents(String(path.dropFirst(larkPrefix.count)))
+            if components.count == 4,
+               components[0] == "aha",
+               components[1] == "users",
+               components[3] == "profile_explorer" {
+                return .init(source: .core, risk: .safe, disposal: .trash,
+                              applyRoute: .genericTrash, activityGuard: .messenger,
+                              reasonKey: "cleanup.risk.messengerCache")
+            }
+            return protectedDescriptor(source: .core, reasonKey: "cleanup.risk.durableIMData")
+        }
+
+        // --- Chromium 系浏览器 profile。
+        for relative in browserProfileRelativeRoots {
+            let root = appSupport + relative
+            guard path == root || isStrictDescendant(path, of: root) else { continue }
+            let components = splitComponents(String(path.dropFirst(appSupport.count)))
+            // 调试用独立 profile 整体可再生（下次调试启动自动重建）。
+            if relative == "Google/ChromeDebug" {
+                return .init(source: .core, risk: .safe, disposal: .trash,
+                              applyRoute: .genericTrash, activityGuard: .browser,
+                              reasonKey: "cleanup.risk.rebuildableCache")
+            }
+            // 持久用户数据（IndexedDB/Login Data/Cookies/Preferences…）。
+            if components.dropFirst().contains(where: {
+                durableBrowserComponents.contains($0)
+            }) {
+                return protectedDescriptor(source: .core,
+                                           reasonKey: "cleanup.risk.durableIMData")
+            }
+            // Service Worker 目录整体可再生（含 ScriptCache/CacheStorage）。
+            if components.dropFirst().contains("service worker") {
+                return .init(source: .core, risk: .safe, disposal: .trash,
+                              applyRoute: .genericTrash, activityGuard: .browser,
+                              reasonKey: "cleanup.risk.rebuildableCache")
+            }
+            // 其余部分（Cache/Code Cache 等）交给通用 Application Support
+            // 缓存叶子规则裁决。
+            return nil
+        }
+        return nil
+    }
+
+    private static func splitComponents(_ value: String) -> [String] {
+        value.split(separator: "/", omittingEmptySubsequences: true)
+            .map { $0.lowercased() }
+    }
+
     static func system() -> CleanupPolicyDescriptor {
         .init(source: .system, risk: .warning, disposal: .privileged,
               applyRoute: .systemPrivileged, activityGuard: .unsupported,
@@ -490,7 +598,7 @@ enum CleanupRiskPolicy {
                                  homeDirectory: homeDirectory) == false
             }
             return category.selectingPaths(selectable)
-        case .browser, .xcode, .simulator, .ide:
+        case .browser, .xcode, .simulator, .ide, .messenger:
             guard snapshot.isComplete else { return category.clearingSelection() }
             guard !ownerIsRunning(for: category, snapshot: snapshot,
                                   homeDirectory: homeDirectory) else {
@@ -584,8 +692,18 @@ enum CleanupRiskPolicy {
         case .browser:
             return snapshotMatches(snapshot,
                                    bundles: ["com.google.Chrome", "org.mozilla.firefox",
-                                             "com.microsoft.edgemac", "company.thebrowser.Browser"],
-                                   processes: ["Google Chrome", "Firefox", "Microsoft Edge", "Arc"])
+                                             "com.microsoft.edgemac", "company.thebrowser.Browser",
+                                             "com.brave.Browser"],
+                                   processes: ["Google Chrome", "Firefox", "Microsoft Edge",
+                                               "Arc", "Brave Browser"])
+        case .messenger:
+            // Telegram / 飞书 / 微信运行期间，其媒体与文档缓存一律保护：
+            // 边写边删既损坏缓存，也可能干扰消息库。
+            return snapshotMatches(snapshot,
+                                   bundles: ["ru.keepcoder.Telegram", "com.electron.lark",
+                                             "com.ss.lark", "com.tencent.xinWeChat"],
+                                   processes: ["Telegram", "Lark", "LarkHelper", "Feishu",
+                                               "飞书", "WeChat", "微信"])
         case .xcode:
             return snapshotMatches(snapshot, bundles: ["com.apple.dt.Xcode"],
                                    processes: ["Xcode", "xcodebuild", "swift-frontend", "SourceKitService"])
@@ -650,19 +768,20 @@ enum CleanupRiskPolicy {
             home + "/Library/Application Support/Codex",
             home + "/Library/Containers/com.docker.docker",
             home + "/Library/Group Containers/group.com.docker",
-            home + "/.docker"
+            home + "/.docker",
+            // 缓存地图禁止清单：钥匙串任何情况下都不动。
+            home + "/Library/Keychains"
         ]
     }
 
     private static func developerCacheRoots(home: String) -> [String] {
         [
-            home + "/.npm",
-            home + "/.pnpm-store",
+            home + "/.npm/_cacache",
+            home + "/.npm/_logs",
             home + "/.swiftpm/cache",
             home + "/.cache/node/corepack",
             home + "/Library/Caches/org.carthage.CarthageKit",
             home + "/.bun/install/cache",
-            home + "/Library/pnpm/store",
             home + "/Library/Caches/pnpm",
             home + "/.yarn/cache",
             home + "/Library/Caches/Yarn",

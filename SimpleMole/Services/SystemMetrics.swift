@@ -161,7 +161,7 @@ enum SystemMetrics {
         return records.joined(separator: "\n")
     }
 
-    static func commandOutput(_ executable: String, arguments: [String]) -> String? {
+    static func commandOutput(_ executable: String, arguments: [String], timeoutSeconds: TimeInterval = 8) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -174,9 +174,9 @@ enum SystemMetrics {
             return nil
         }
         let timeout = DispatchWorkItem {
-            if process.isRunning { process.terminate() }
+            if process.isRunning { Darwin.kill(process.processIdentifier, SIGKILL) }
         }
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 8, execute: timeout)
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeoutSeconds, execute: timeout)
         defer { timeout.cancel() }
         // Drain while the child is running. Waiting first deadlocks when a
         // large process table fills the pipe and ps cannot finish writing.
@@ -280,6 +280,32 @@ enum SystemMetrics {
         let freeBytes = UInt64(volume.f_bavail) * UInt64(volume.f_bsize)
         let usedPercent = 100.0 * Double(volume.f_blocks - volume.f_bavail) / Double(volume.f_blocks)
         return (freeBytes, usedPercent)
+    }
+
+    /// 每个活动接口的累计字节数（自接口创建起单调）。每个接口只取
+    /// AF_LINK 条目计数，避免同一接口多地址族条目重复累加。
+    /// utun* 汇总即隧道承载，en* 汇总即物理口出口。
+    static func interfaceCounters() -> [String: (inbound: UInt64, outbound: UInt64)] {
+        var result: [String: (inbound: UInt64, outbound: UInt64)] = [:]
+        var interfaces: UnsafeMutablePointer<ifaddrs>? = nil
+        guard getifaddrs(&interfaces) == 0 else { return result }
+        var cursor = interfaces
+        while let current = cursor {
+            defer { cursor = current.pointee.ifa_next }
+            guard let namePointer = current.pointee.ifa_name,
+                  let address = current.pointee.ifa_addr,
+                  address.pointee.sa_family == AF_LINK,
+                  (current.pointee.ifa_flags & UInt32(IFF_UP)) != 0,
+                  (current.pointee.ifa_flags & UInt32(IFF_LOOPBACK)) == 0,
+                  let data = current.pointee.ifa_data else { continue }
+            let interfaceData = data.assumingMemoryBound(to: if_data.self)
+            let name = String(cString: namePointer)
+            let existing = result[name] ?? (0, 0)
+            result[name] = (existing.inbound + UInt64(interfaceData.pointee.ifi_ibytes),
+                            existing.outbound + UInt64(interfaceData.pointee.ifi_obytes))
+        }
+        freeifaddrs(interfaces)
+        return result
     }
 
     private static func networkRates() -> (rx: Double, tx: Double) {

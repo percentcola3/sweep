@@ -821,6 +821,40 @@ test_analyze_ai_inventory() {
     pass "AI Skill and MCP inventory selection, Trash and path safety"
 }
 
+test_system_preview_protocol() {
+    local fixture_root="$TEST_ROOT/system-preview-fixture"
+    local fixtures="$TEST_ROOT/system-preview-fixtures.sh"
+    local output="" line lines=0
+
+    mkdir -p "$fixture_root/logs" "$fixture_root/reports"
+    printf 'old log\n' > "$fixture_root/logs/old.log"
+    printf 'report\n' > "$fixture_root/reports/crash.report"
+    /usr/bin/touch -t 202001010000 \
+        "$fixture_root/logs/old.log" "$fixture_root/reports/crash.report"
+    cat > "$fixtures" <<EOF
+scan_file_group logs safe 0 "" "$fixture_root/logs"
+scan_file_group reports safe 0 "" "$fixture_root/reports"
+scan_entry_group caches safe 0 "$fixture_root/logs"
+EOF
+
+    # "&& break" 作为 emit_sorted 循环体最后一条语句会把循环状态置 1，
+    # 函数返回后在 set -e 下杀死脚本：提权扫描授权后永远拿不到结果。
+    output=$(env SM_SYSTEM_PREVIEW_FIXTURES="$fixtures" \
+        SM_SYSTEM_PREVIEW_MAX_ROWS=400 TMPDIR="$TEST_ROOT" \
+        bash "$RUNTIME_DIR/bin/app_system_preview.sh" "$(id -un)" "$HOME") || \
+        fail "system preview exited non-zero with under-cap fixture rows"
+    while IFS= read -r line; do
+        lines=$((lines + 1))
+        [[ "$line" == entry$'\t'* ]] || fail "system preview emitted a malformed line"
+    done <<< "$output"
+    [[ "$lines" -ge 2 ]] || fail "system preview dropped fixture rows"
+
+    output=$(env TMPDIR="$TEST_ROOT" \
+        bash "$RUNTIME_DIR/bin/app_system_preview.sh" "$(id -un)" "$HOME") || \
+        fail "system preview failed on the machine's real roots"
+    pass "system preview protocol survives under-cap groups"
+}
+
 test_signing_policy_contract() {
     local package_script="$ROOT_DIR/script/package_dmg.sh"
     /usr/bin/grep -Fq 'SM_ALLOW_ADHOC' "$ROOT_DIR/script/build.sh" || \
@@ -1430,14 +1464,16 @@ test_auto_cleanup_apply() {
 }
 
 test_installer_apply() {
-    local home trash plan target identity output rc outside
+    local home trash plan target identity output rc outside state trash_before
     home="$(cd "$TEST_ROOT" && pwd -P)/installer-home"
     trash="$TEST_ROOT/installer-trash"
     plan="$TEST_ROOT/installer-plan"
     mkdir -p "$home/.config/mole" "$home/Downloads" "$home/Desktop" "$trash"
 
     run_installer_apply_fixture() {
+        local delete_mode="${1:-trash}" process_state="${2:-idle}"
         env HOME="$home" MOLE_TEST_MODE=1 MOLE_TEST_NO_AUTH=1 \
+            SIMPLEMOLE_DELETE_MODE="$delete_mode" MOLE_TEST_PROCESS_STATE="$process_state" \
             MOLE_TEST_TRASH_DIR="$trash" MOLE_DELETE_LOG="$TEST_ROOT/installer-deletions.log" \
             MO_TIMEOUT_INITIALIZED=1 MO_TIMEOUT_BIN= MO_TIMEOUT_PERL_BIN= \
             bash "$RUNTIME_DIR/bin/app_installer_apply.sh" < "$plan"
@@ -1450,6 +1486,43 @@ test_installer_apply() {
     output=$(run_installer_apply_fixture) || fail "installer apply rejected an allowed current file"
     [[ ! -e "$target" && "$output" == *"removed=1"* && "$output" == *"failed=0"* ]] || \
         fail "installer apply did not Trash an allowed file: $output"
+    [[ "$(find "$trash" -type f | wc -l | tr -d ' ')" == "1" ]] || \
+        fail "recoverable installer apply did not use the isolated Trash fixture"
+
+    target="$home/Downloads/Permanent.pkg"
+    printf 'permanent installer\n' > "$target"
+    identity=$(/usr/bin/stat -f '%d:%i:%m' "$target")
+    printf '%s\0%s\0' "$target" "$identity" > "$plan"
+    trash_before=$(find "$trash" -type f | wc -l | tr -d ' ')
+    output=$(run_installer_apply_fixture permanent) || \
+        fail "permanent installer apply rejected an allowed current file: $output"
+    [[ ! -e "$target" && "$output" == *"removed=1"* && "$output" == *"failed=0"* ]] || \
+        fail "permanent installer apply did not delete the selected file: $output"
+    [[ "$(find "$trash" -type f | wc -l | tr -d ' ')" == "$trash_before" ]] || \
+        fail "permanent installer apply incorrectly moved the file to Trash"
+    /usr/bin/grep -Fq $'\tpermanent\t' "$TEST_ROOT/installer-deletions.log" || \
+        fail "permanent installer apply did not reach the permanent deletion sink"
+
+    # A mounted/open installer, or an unavailable process snapshot, must stay
+    # in place even after the user confirmed permanent deletion.
+    for state in active unknown; do
+        target="$home/Downloads/$state.dmg"
+        printf '%s installer\n' "$state" > "$target"
+        identity=$(/usr/bin/stat -f '%d:%i:%m' "$target")
+        printf '%s\0%s\0' "$target" "$identity" > "$plan"
+        set +e
+        output=$(run_installer_apply_fixture permanent "$state" 2>&1)
+        rc=$?
+        set -e
+        [[ "$rc" -eq 0 && -e "$target" && "$output" == *"removed=0"* && \
+            "$output" == *"skipped=1"* && "$output" == *"failed=0"* ]] || \
+            fail "permanent installer apply ignored $state runtime state: $output"
+        [[ "$(find "$trash" -type f | wc -l | tr -d ' ')" == "$trash_before" ]] || \
+            fail "runtime-protected installer was moved to Trash"
+        /usr/bin/grep -F $'\tfinal-guard\t' "$TEST_ROOT/installer-deletions.log" | \
+            /usr/bin/grep -Fq "$target" || \
+            fail "$state installer was not protected at the final deletion edge"
+    done
 
     outside="$home/not-allowed"
     target="$outside/Outside.dmg"
@@ -1458,11 +1531,11 @@ test_installer_apply() {
     identity=$(/usr/bin/stat -f '%d:%i:%m' "$target")
     printf '%s\0%s\0' "$target" "$identity" > "$plan"
     set +e
-    output=$(run_installer_apply_fixture 2>&1)
+    output=$(run_installer_apply_fixture permanent 2>&1)
     rc=$?
     set -e
     [[ "$rc" -ne 0 && -e "$target" && "$output" == *"failed=1"* ]] || \
-        fail "installer apply accepted a file outside configured roots: $output"
+        fail "permanent installer apply accepted a file outside configured roots: $output"
 
     target="$home/Downloads/notes.txt"
     printf 'not an installer\n' > "$target"
@@ -1491,18 +1564,18 @@ test_installer_apply() {
     identity=$(stale_identity_for "$target")
     printf '%s\0%s\0' "$target" "$identity" > "$plan"
     set +e
-    output=$(run_installer_apply_fixture 2>&1)
+    output=$(run_installer_apply_fixture permanent 2>&1)
     rc=$?
     set -e
     [[ "$rc" -ne 0 && -e "$target" && "$output" == *"failed=1"* ]] || \
-        fail "installer apply accepted a stale identity: $output"
+        fail "permanent installer apply accepted a stale identity: $output"
 
     target="$home/Downloads/keep.xip"
     printf 'keep\n' > "$target"
     printf '%s\n' "$target" > "$home/.config/mole/whitelist"
     identity=$(/usr/bin/stat -f '%d:%i:%m' "$target")
     printf '%s\0%s\0' "$target" "$identity" > "$plan"
-    output=$(run_installer_apply_fixture) || fail "installer apply failed on a whitelisted file"
+    output=$(run_installer_apply_fixture permanent) || fail "installer apply failed on a whitelisted file"
     [[ -e "$target" && "$output" == *"skipped=1"* && "$output" == *"failed=0"* ]] || \
         fail "installer apply did not preserve a whitelisted file: $output"
     : > "$home/.config/mole/whitelist"
@@ -1513,7 +1586,7 @@ test_installer_apply() {
     identity=$(/usr/bin/stat -f '%d:%i:%m' "$target")
     printf '%s\0%s\0' "$target" "$identity" > "$plan"
     set +e
-    output=$(run_installer_apply_fixture 2>&1)
+    output=$(run_installer_apply_fixture permanent 2>&1)
     rc=$?
     set -e
     [[ "$rc" -ne 0 && -L "$target" && -e "$outside/link-target.dmg" && \
@@ -1527,14 +1600,14 @@ test_installer_apply() {
     identity=$(/usr/bin/stat -f '%d:%i:%m' "$target")
     printf '%s\0%s\0' "$target" "$identity" > "$plan"
     set +e
-    output=$(run_installer_apply_fixture 2>&1)
+    output=$(run_installer_apply_fixture permanent 2>&1)
     rc=$?
     set -e
     [[ "$rc" -ne 0 && -e "$outside/escaped-parent/Escaped.iso" && \
         "$output" == *"failed=1"* ]] || \
         fail "installer apply followed a symlinked ancestor outside its root: $output"
 
-    pass "installer apply root, type, identity, whitelist and symlink guards"
+    pass "installer apply permanent/Trash modes, runtime, root, type, identity, whitelist and symlink guards"
 }
 
 test_packaged_apply_layout() {
@@ -1924,7 +1997,7 @@ test_uninstall_queue() {
         fail "uninstall worker bypasses the queue's exclusive start"
     /usr/bin/grep -Fq 'isBusyExcludingUninstall || confirmation != nil || isDispatchingConfirmation' \
         "$state_source" || fail "uninstall worker is not gated against other writes and confirmations"
-    /usr/bin/grep -Fq 'state.runConfirmation()' \
+    /usr/bin/grep -Fq 'state.runConfirmation(accepted)' \
         "$ROOT_DIR/SimpleMole/Views/MainWindowView.swift" || \
         fail "confirmation dispatch bypasses the asynchronous operation gate"
     /usr/bin/grep -Fq 'guard !isStoppingUninstallQueue, !blocked,' "$state_source" || \
@@ -2264,6 +2337,141 @@ test_runtime_process_identity_binding() {
     pass "runtime PID binding, stale-state cleanup, and process-tree protection"
 }
 
+test_netmon_bridge() {
+    local helper="$RUNTIME_DIR/bin/app_netmon.sh"
+    local stub_dir="$TEST_ROOT/netmon-stub"
+    local fixture_cfg="$TEST_ROOT/netmon-clash.yaml"
+    local output="" rc=0
+
+    mkdir -p "$stub_dir"
+
+    # nettop：空格/点号进程名和 PID 数字后缀必须分开处理。
+    printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        'printf "time\\tinterface\\tstate\\tbytes_in\\tbytes_out\\n"' \
+        'printf "10:00:00.000001 launchd.1\\t\\t\\t0\\t0\\t0\\t0\\t0\\n"' \
+        'printf "10:00:00.000002 Google Chrome Helper.123\\t\\t\\t100\\t200\\t0\\t0\\t0\\n"' \
+        'printf "10:00:00.000003 kernel_task.0\\t\\t\\t9\\t9\\t0\\t0\\t0\\n"' \
+        'printf "10:00:00.000004 weird.pidX\\t\\t\\t1\\t2\\n"' \
+        'printf "10:00:00.000005 com.apple.WebKit.456\\t\\t\\t300\\t400\\n"' \
+        'printf "10:00:00.000006 worker.2.789\\t\\t\\t500\\t600\\n"' \
+        > "$stub_dir/nettop"
+    printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        '[[ " $* " == *" -FpcnP "* ]] || exit 2' \
+        'printf "p1131\\ncD-Chat\\nf10\\nPTCP\\nn127.0.0.1:1->221.229.52.251:80\\n"' \
+        'printf "p1138\\ncTencentMeeting\\nf20\\nPUDP\\nn[fe80::1]:1->[2606:4700::1]:8080\\n"' \
+        'printf "p999\\ncListener\\nf30\\nPTCP\\nn*:9090\\n"' \
+        > "$stub_dir/lsof"
+    printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        'if [[ "$1" == "-n" ]]; then shift; fi' \
+        'if [[ "${1:-}" == "get" ]]; then' \
+        '    address="${@: -1}"' \
+        '    if [[ "$address" == "8.8.8.8" ]]; then printf "   interface: en0\\n"' \
+        '    elif [[ "$address" == "2606:4700::1" ]]; then exit 0' \
+        '    else printf "   interface: utun9\\n"; fi' \
+        'fi' \
+        > "$stub_dir/route"
+    printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        'printf "%s\\n" "$*" >> "$MOLE_TEST_CURL_ARGS"' \
+        'cat "${MOLE_TEST_CURL_BODY:-/dev/null}"' \
+        > "$stub_dir/curl"
+    printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        'printf "/Applications/Clash Verge.app/Contents/MacOS/verge-mihomo -d /tmp/verge-data -f %s -ext-ctl-unix /tmp/verge/verge-mihomo.sock\\n" "$MOLE_TEST_CLASH_CFG"' \
+        > "$stub_dir/ps"
+    printf '%s\n' \
+        "external-controller: ''" \
+        'external-controller-unix: /tmp/verge/verge-mihomo.sock' \
+        'secret: testsecret' \
+        'mixed-port: 7897' \
+        'socks-port: 7891' \
+        'port: 7890' \
+        > "$fixture_cfg"
+    chmod +x "$stub_dir"/*
+
+    output=$(env MOLE_TEST_MODE=1 MOLE_TEST_NETTOP_BIN="$stub_dir/nettop" \
+        bash "$helper" bytes) || fail "netmon bytes mode failed"
+    [[ "$output" == *"proc"$'\t'"123"$'\t'"100"$'\t'"200"$'\t'"Google Chrome Helper"* ]] || \
+        fail "netmon bytes dropped the spaced process name: $output"
+    [[ "$output" == *"proc"$'\t'"1"$'\t'"0"$'\t'"0"$'\t'"launchd"* ]] || \
+        fail "netmon bytes dropped the pid-1 daemon row: $output"
+    [[ "$output" != *"kernel_task"* && "$output" != *"weird"* ]] || \
+        fail "netmon bytes accepted invalid pid rows: $output"
+    [[ "$output" == *"proc"$'\t'"456"$'\t'"300"$'\t'"400"$'\t'"com.apple.WebKit"* ]] || \
+        fail "netmon bytes dropped the dotted process name: $output"
+    [[ "$output" == *"proc"$'\t'"789"$'\t'"500"$'\t'"600"$'\t'"worker.2"* ]] || \
+        fail "netmon bytes used a process-name component as PID: $output"
+
+    output=$(env MOLE_TEST_MODE=1 MOLE_TEST_LSOF_BIN="$stub_dir/lsof" \
+        bash "$helper" flows) || fail "netmon flows mode failed"
+    [[ "$output" == *"flow"$'\t'"1131"$'\t'"D-Chat"$'\t'"TCP"$'\t'"127.0.0.1:1"$'\t'"221.229.52.251:80"* ]] || \
+        fail "netmon flows lost the connected TCP row: $output"
+    [[ "$output" == *"UDP"$'\t'"[fe80::1]:1"$'\t'"[2606:4700::1]:8080"* ]] || \
+        fail "netmon flows lost the UDP protocol or IPv6 endpoint: $output"
+    [[ "$output" != *":9090"* ]] || fail "netmon flows kept a listener row: $output"
+
+    output=$(printf '8.8.8.8\n2606:4700::1\nnot-an-ip\n10.0.0.1\n' \
+        | env MOLE_TEST_MODE=1 MOLE_TEST_ROUTE_BIN="$stub_dir/route" \
+            bash "$helper" routes) || fail "netmon routes mode failed"
+    [[ "$output" == *"route"$'\t'"8.8.8.8"$'\t'"en0"* ]] || \
+        fail "netmon routes missed the en0 lookup: $output"
+    [[ "$output" == *"route"$'\t'"2606:4700::1"$'\t'"unknown"* ]] || \
+        fail "netmon routes did not fail closed on unrouted v6: $output"
+    [[ "$output" == *"route"$'\t'"10.0.0.1"$'\t'"utun9"* ]] || \
+        fail "netmon routes missed the utun lookup: $output"
+    [[ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" == "3" ]] || \
+        fail "netmon routes accepted a non-address line: $output"
+
+    output=$(env MOLE_TEST_MODE=1 MOLE_TEST_CURL_BIN="$stub_dir/curl" \
+        MOLE_TEST_CURL_ARGS="$TEST_ROOT/netmon-curl-args" \
+        CLASH_ENDPOINT="unix:/tmp/verge/verge-mihomo.sock" \
+        CLASH_SECRET="s3cr3t" \
+        MOLE_TEST_CURL_BODY="$TEST_ROOT/netmon-curl-body" \
+        bash -c 'printf "{\"version\":\"test\"}" > "$MOLE_TEST_CURL_BODY"; bash "$0" clash' "$helper") || \
+        fail "netmon clash mode failed"
+    [[ "$output" == '{"version":"test"}' ]] || \
+        fail "netmon clash did not pass the controller body through: $output"
+    grep -Fq -- "--unix-socket /tmp/verge/verge-mihomo.sock" "$TEST_ROOT/netmon-curl-args" || \
+        fail "netmon clash did not use the unix socket"
+    grep -Fq -- "Authorization: Bearer s3cr3t" "$TEST_ROOT/netmon-curl-args" || \
+        fail "netmon clash did not send the bearer secret"
+
+    set +e
+    output=$(env MOLE_TEST_MODE=1 bash "$helper" clash 2>/dev/null)
+    rc=$?
+    set -e
+    assert_status 2 "$rc" "clash mode without an endpoint did not fail closed"
+
+    output=$(env MOLE_TEST_MODE=1 MOLE_TEST_PS_BIN="$stub_dir/ps" \
+        MOLE_TEST_CLASH_CFG="$fixture_cfg" \
+        bash "$helper" discover) || fail "netmon discover mode failed"
+    [[ "$output" == *"endpoint"$'\t'"unix:/tmp/verge/verge-mihomo.sock"* ]] || \
+        fail "netmon discover lost the unix endpoint: $output"
+    [[ "$output" == *"secret"$'\t'"testsecret"* ]] || \
+        fail "netmon discover lost the controller secret: $output"
+    [[ "$output" == *"mixedport"$'\t'"7897"* ]] || \
+        fail "netmon discover lost the mixed port: $output"
+    [[ "$output" == *"proxyport"$'\t'"7897"* \
+        && "$output" == *"proxyport"$'\t'"7891"* \
+        && "$output" == *"proxyport"$'\t'"7890"* ]] || \
+        fail "netmon discover lost a configured proxy port: $output"
+    [[ "$output" != *"mixedport"$'\t'"7891"* && "$output" != *"mixedport"$'\t'"7890"* ]] || \
+        fail "netmon discover mislabeled HTTP/SOCKS ports as mixed ports: $output"
+    [[ "$output" != *"endpoint"$'\t'"http:"* ]] || \
+        fail "netmon discover invented a TCP endpoint from an empty controller"
+
+    set +e
+    output=$(env MOLE_TEST_MODE=1 bash "$helper" bogus-mode 2>/dev/null)
+    rc=$?
+    set -e
+    assert_status 2 "$rc" "netmon unknown mode did not fail closed"
+
+    pass "netmon bridge byte, flow, route, clash and discovery contracts"
+}
+
 test_dev_env_current_version_lock() {
     local home="$TEST_ROOT/env-home"
     local current="$home/.nvm/versions/node/v20.1.0"
@@ -2522,6 +2730,18 @@ test_project_automation() {
 }
 
 test_cleanup_execution_accounting() {
+    local apply_source installer_source
+    apply_source=$(sed -n '/private func performApply(/,/private func reportCleanupResult/p' \
+        "$ROOT_DIR/SimpleMole/AppState.swift")
+    if printf '%s\n' "$apply_source" | grep -Fq 'cleanupScanComplete = false'; then
+        fail "partial cleanup invalidates the scan and disables retry"
+    fi
+    installer_source=$(sed -n '/func applyInstallers()/,/func applyCleanup()/p' \
+        "$ROOT_DIR/SimpleMole/AppState.swift")
+    printf '%s\n' "$installer_source" | grep -Fq 'permanently: true' || \
+        fail "reviewed installer cleanup does not request permanent deletion"
+    printf '%s\n' "$installer_source" | grep -Fq 'cleanup.installers.confirm' || \
+        fail "installer cleanup lacks an explicit permanent-deletion confirmation"
     if [[ "${SM_TEST_SKIP_SWIFT:-0}" == "1" ]]; then
         printf 'ok - Cleanup execution accounting tests skipped (SM_TEST_SKIP_SWIFT=1)\n'
         return
@@ -2607,6 +2827,7 @@ test_scan_access_boundary
 test_xcode_scan_boundary
 test_developer_scan_boundary
 test_analyze_ai_inventory
+test_system_preview_protocol
 test_signing_policy_contract
 test_gc_runner
 test_node_cache_inventory
@@ -2621,6 +2842,11 @@ test_uninstall_queue
 test_cleanup_process_probe_batching
 test_runtime_process_identity_binding
 test_runtime_store_aggregation
+test_netmon_bridge
+if [[ "${SM_TEST_SKIP_SWIFT:-0}" != "1" ]]; then
+    bash "$ROOT_DIR/script/test_traffic.sh" || fail "traffic accounting and app attribution"
+    pass "traffic accounting, app attribution and descending rankings"
+fi
 test_dev_env_current_version_lock
 test_nvm_delete_time_guard
 test_owner_managed_runtimes_readonly

@@ -19,7 +19,7 @@ struct CleanupTabView: View {
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 .help(l10n.t("cleanup.scan.deep.hint"))
-                .disabled(state.isBusy)
+                .disabled(state.isBusyExcludingUninstall || state.cleanupQueued)
                 if state.isCleanupScanning || !state.categories.isEmpty {
                     quickCleanButton
                 }
@@ -78,6 +78,17 @@ struct CleanupTabView: View {
                 }
             }
 
+            if !state.isCleanupScanning, let installers = state.installerCandidates {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(l10n.t("cleanup.installers.review")).font(.caption).foregroundStyle(.secondary)
+                    CategoryRowView(category: Binding(
+                        get: { state.installerCandidates ?? installers },
+                        set: { state.installerCandidates = $0 }), selectionEnabled: !state.isBusy)
+                    Button(l10n.t("confirm.cleanupPermanent.ok")) { state.applyInstallers() }
+                        .disabled(state.isBusy || state.installerCandidates?.selectedSubset == nil)
+                }.padding(.horizontal, 16).padding(.vertical, 8)
+            }
+
             if !state.isCleanupScanning && !state.categories.isEmpty {
                 Divider()
                 cleanupActions
@@ -93,7 +104,7 @@ struct CleanupTabView: View {
                   systemImage: "sparkles")
         }
         .buttonStyle(PrimaryButtonStyle())
-        .disabled(state.isBusy)
+        .disabled(state.isBusyExcludingUninstall || state.cleanupQueued)
     }
 
     private var cleanupActions: some View {
@@ -140,13 +151,14 @@ struct CleanupTabView: View {
             }
             .buttonStyle(PrimaryButtonStyle())
             .help(applyLabel)
-            .disabled(state.selectedCount == 0 || state.isBusy || !state.cleanupScanComplete)
+            .disabled(state.selectedCount == 0 || state.isBusyExcludingUninstall || state.cleanupQueued || !state.cleanupScanComplete)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
     }
 
     private var applyLabel: String {
+        if state.cleanupQueued { return l10n.t("cleanup.queued") }
         if state.isApplying { return l10n.t("cleanup.apply.busy") }
         if state.selectedCount > 0 {
             return l10n.tf("cleanup.delete.withCount", state.selectedCount,

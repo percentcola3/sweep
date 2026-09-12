@@ -31,7 +31,7 @@ final class AppState: ObservableObject {
 
     /// 功能页标识：设置中可按需隐藏。
     enum PageKey: String, CaseIterable, Identifiable {
-        case cleanup, analyze, uninstall, optimize, system, devenv, processes, ports, images, clipboard
+        case cleanup, analyze, uninstall, optimize, system, devenv, processes, ports, traffic, images, clipboard
         var id: String { rawValue }
         var titleKey: String { "tab.\(rawValue)" }
 
@@ -99,8 +99,17 @@ final class AppState: ObservableObject {
 
     /// 系统数据页的独立清单：root 拥有的日志、报告与缓存。
     /// 与通用清理页的 categories/family 完全解耦，避免互相覆盖状态。
+    @Published var installerCandidates: CleanupCategory?
+    @Published var quickPanelCleaning = false
+    @Published var quickPanelStatus = ""
+    @Published var processActionStatus = ""
+    @Published var cleanupQueued = false
+    private var pendingCleanup: (() -> Void)?
+
     @Published var systemEntries: [SystemDataEntry] = []
     @Published var systemScanning = false
+    @Published var systemApplying = false
+    @Published var systemStatus = L10n.shared.t("system.scan")
     @Published var systemScanComplete = false
     /// 本次会话通过系统数据页实际回收的字节数（由执行脚本回报）。
     @Published var systemSessionReclaimed: UInt64 = 0
@@ -193,6 +202,10 @@ final class AppState: ObservableObject {
     let dockerInventory = DockerInventoryStore()
     @Published var showSimulatorDevices = false
     @Published var showDockerDetails = false
+
+    // MARK: 流量监控
+
+    let trafficMonitor = TrafficMonitorStore()
 
     // MARK: 项目雷达与受限自动化
 
@@ -360,8 +373,7 @@ final class AppState: ObservableObject {
 
     /// Keep the disk worker gated while the alert closes and its accepted
     /// action is dispatched. Otherwise it can race a cleanup confirmation.
-    func runConfirmation() {
-        guard let accepted = confirmation else { return }
+    func runConfirmation(_ accepted: Confirmation) {
         isDispatchingConfirmation = true
         confirmation = nil
         DispatchQueue.main.async { [weak self] in
@@ -424,17 +436,40 @@ final class AppState: ObservableObject {
         executeProtectedOperation(operation)
     }
 
-    /// 快捷面板必须对每次点击给出可见反馈。先打开主窗口，再由这里判断
-    /// 全局互斥；不能像旧实现那样因任意后台任务直接禁用按钮并静默丢弃。
+    /// Explicit quick-panel action: reclaim disposable app memory and clean
+    /// runtime-checked caches, keeping progress and results in the panel.
     func requestQuickOptimizeFromQuickPanel() {
-        jump(to: .cleanup)
         guard !isBusy else {
-            let message = l10n.t("status.quickOptimizeBusy")
-            statusText = message
-            log(message)
+            quickPanelStatus = l10n.t("status.quickOptimizeBusy")
             return
         }
-        requestScanAccess(.quickOptimize)
+        guard authorize(.quickPanelClean, presentingPermissionCenter: true) else {
+            quickPanelStatus = l10n.t("quick.panel.permission")
+            return
+        }
+        quickPanelCleaning = true
+        isScanning = true
+        quickPanelStatus = l10n.t("status.scanningCleanup")
+        Task {
+            MosaicCache.shared.clear()
+            _ = malloc_zone_pressure_relief(nil, 0)
+            let scan = await unifiedCleanupScan(mode: .quick)
+            isScanning = false
+            guard scan.runtimeResult.succeeded,
+                  scan.requiredSourceResults.allSatisfy(\.succeeded) else {
+                quickPanelCleaning = false
+                quickPanelStatus = l10n.t("log.scanPartial")
+                return
+            }
+            let safe = finalizedCleanupCategories(scan.categories, snapshot: scan.runningSnapshot)
+                .compactMap { category in
+                    category.retainingPaths(category.paths.filter {
+                        !$0.hasPrefix(NSHomeDirectory() + "/.Trash/")
+                    })?.selectedSubset
+                }
+            quickPanelStatus = l10n.t("cleanup.apply.busy")
+            performApply(categories: safe, imageMode: nil, family: .clean, mode: .quickClean)
+        }
     }
 
     func recheckFullDiskAccess() {
@@ -526,6 +561,7 @@ final class AppState: ObservableObject {
         case .cleanupScan(let force): scanCleanup(force: force)
         case .deepCleanupScan: scanCleanup(force: true, mode: .deep)
         case .quickOptimize: quickOptimize()
+        case .quickPanelClean: requestQuickOptimizeFromQuickPanel()
         case .optimize: runOptimize()
         case .developerToolsScan: scanDeveloperTools()
         case .aiScan: scanAI()
@@ -557,16 +593,16 @@ final class AppState: ObservableObject {
     private let l10n = L10n.shared
 
     var isBusy: Bool {
-        isBusyExcludingUninstall || uninstallQueue.hasWork
+        isBusyExcludingUninstall || uninstallQueue.hasWork || cleanupQueued
     }
 
-    private var isBusyExcludingUninstall: Bool {
+    var isBusyExcludingUninstall: Bool {
         isScanning || isApplying || isScanningImages
             || isScanningEnv
             || isAnalyzing || isThinning || isScanningDups
             || gcRunningId != nil || netFixRunning || isAutoCleanupScanning
             || isSmartAutomationRunning || projectHibernation.isWorking
-            || isOptimizing || systemScanning
+            || isOptimizing || systemScanning || systemApplying
             || simulatorInventory.isDeleting || projectRadar.isScanning
     }
 
@@ -653,6 +689,9 @@ final class AppState: ObservableObject {
                         // Keep the existing result/selection. Scanning starts
                         // only from the user's quick/deep scan actions.
                         break
+                    case .system:
+                        // System inventory also requires an explicit scan button.
+                        break
                     case .analyze:
                         self.scanSnapshots()
                         self.permissionCenter.refresh()
@@ -676,6 +715,7 @@ final class AppState: ObservableObject {
                         self.runConfigAudits()
                     case .processes: self.refreshProcesses()
                     case .ports: self.refreshPorts()
+                    case .traffic: self.trafficMonitor.tick()
                     default: break
                     }
                 }
@@ -721,6 +761,10 @@ final class AppState: ObservableObject {
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
         simulatorInventory.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        trafficMonitor.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
@@ -940,7 +984,9 @@ final class AppState: ObservableObject {
 
     func cancelCleanupScan() {
         cleanupScanControl?.cancel()
-        MoleEngine.shared.cancelAll()
+        // A read-only inventory can overlap an uninstall. Never cancel that
+        // unrelated mutation through the engine's global cancellation hook.
+        if uninstallQueue.activeJob == nil { MoleEngine.shared.cancelAll() }
     }
 
     private func finishCleanupProgress() {
@@ -959,7 +1005,7 @@ final class AppState: ObservableObject {
         guard authorize(operation, presentingPermissionCenter: true) else {
             return
         }
-        guard !isBusy else { return }
+        guard !isBusyExcludingUninstall, !cleanupQueued else { return }
         family = .clean
         if mode == .quick, !force, let cached = CleanupCache.restore() {
             beginCleanupProgress()
@@ -1029,7 +1075,7 @@ final class AppState: ObservableObject {
 
     func quickOptimize() {
         guard authorize(.quickOptimize, presentingPermissionCenter: true) else { return }
-        guard !isBusy else { return }
+        guard !isBusyExcludingUninstall, !cleanupQueued else { return }
         family = .clean
         jump(to: .cleanup)
         // One-click clean only prepares the quick inventory. It never opens a
@@ -1129,6 +1175,21 @@ final class AppState: ObservableObject {
             exitCode: coreScan.succeeded ? 0 : 1, timedOut: false)
 
         let combined = CleanupCategory.safeCleanupCandidates(from: coreScan.categories)
+        if mode == .deep, !control.isCancelled {
+            cleanupProgress.phase = l10n.t("file.installer")
+            let installers = await MoleEngine.shared.runBridge("bin/app_installer_scan.sh",
+                extraEnvironment: fullDiskScanEnvironment, timeout: 45)
+            installerCandidates = installers.succeeded
+                ? Parsers.installerCategory(installers.output)?.clearingSelection() : nil
+            if !installers.succeeded { logFailure(installers) }
+        }
+        if control.isCancelled {
+            let cancelled = RunResult(output: "", errorOutput: "Scan cancelled.", exitCode: 1, timedOut: false)
+            return UnifiedCleanupScan(categories: [], sourceResults: [cancelled],
+                requiredSourceResults: [cancelled], runtimeResult: runtimeResult,
+                runningSnapshot: .unavailable)
+        }
+
 
         let snapshot = RuntimeStore.runningApplicationSnapshot(
             fromProcessText: runtimeResult.output, isComplete: runtimeResult.succeeded)
@@ -1258,8 +1319,9 @@ final class AppState: ObservableObject {
         guard authorize(.systemScan, presentingPermissionCenter: true) else { return }
         guard !isBusy else { return }
         systemScanning = true
+        systemScanComplete = false
         systemEntries = []
-        statusText = l10n.t("status.systemScanning")
+        systemStatus = l10n.t("status.systemScanning")
         log(l10n.t("log.systemScan"))
         Task {
             let result = await MoleEngine.shared.runPrivilegedBridge(
@@ -1271,11 +1333,18 @@ final class AppState: ObservableObject {
                 ? Parsers.systemDataEntries(result.output)
                 : []
             if systemEntries.isEmpty {
-                statusText = l10n.t("status.systemEmpty")
-                log(result.succeeded ? l10n.t("log.systemScanEmpty") : l10n.t("log.systemScanAbort"))
-                logFailure(result)
+                // 空结果与失败必须区分：失败复用同一条空态文案会让用户
+                // 以为扫描成功却什么都没找到。
+                if result.succeeded {
+                    systemStatus = l10n.t("status.systemEmpty")
+                    log(l10n.t("log.systemScanEmpty"))
+                } else {
+                    systemStatus = l10n.t("status.systemFailed")
+                    log(l10n.t("log.systemScanAbort"))
+                    logFailure(result)
+                }
             } else {
-                statusText = l10n.t("status.systemDone")
+                systemStatus = l10n.t("status.systemDone")
                 log(l10n.t("log.systemScanDone"))
             }
         }
@@ -1316,7 +1385,7 @@ final class AppState: ObservableObject {
         guard !isBusy, systemScanComplete else { return }
         let selected = systemEntries.filter(\.selected)
         guard !selected.isEmpty else {
-            statusText = l10n.t("cleanup.selectNone")
+            systemStatus = l10n.t("cleanup.selectNone")
             return
         }
         confirmation = Confirmation(
@@ -1354,13 +1423,13 @@ final class AppState: ObservableObject {
                 ofItemAtPath: selectionURL.path)
         } catch {
             try? FileManager.default.removeItem(at: selectionURL)
-            statusText = l10n.t("status.systemPartial")
+            systemStatus = l10n.t("status.systemPartial")
             log(l10n.t("log.systemApplyPartial"))
             log(error.localizedDescription)
             return
         }
-        isApplying = true
-        statusText = l10n.t("status.systemCleaning")
+        systemApplying = true
+        systemStatus = l10n.t("status.systemCleaning")
         log(l10n.t("log.systemApply"))
         Task {
             let result = await MoleEngine.shared.runPrivilegedBridge(
@@ -1368,7 +1437,7 @@ final class AppState: ObservableObject {
                 arguments: [NSUserName(), NSHomeDirectory(), selectionURL.path,
                             selectionDigest])
             try? FileManager.default.removeItem(at: selectionURL)
-            isApplying = false
+            systemApplying = false
             if !result.output.isEmpty { log(result.output) }
             logFailure(result, stdoutAlreadyLogged: true)
             let summary = Parsers.systemApplySummary(result.output)
@@ -1378,7 +1447,7 @@ final class AppState: ObservableObject {
             systemEntries = systemEntries.filter {
                 FileManager.default.fileExists(atPath: $0.path)
             }
-            statusText = result.succeeded
+            systemStatus = result.succeeded
                 ? l10n.t("status.systemApplyDone")
                 : l10n.t("status.systemPartial")
             log(result.succeeded
@@ -1389,8 +1458,28 @@ final class AppState: ObservableObject {
 
     // MARK: - 清理执行
 
+    func applyInstallers() {
+        guard !isBusy, let selection = installerCandidates?.selectedSubset else { return }
+        confirmation = Confirmation(title: l10n.t("file.installer"),
+            message: l10n.tf("cleanup.installers.confirm", selection.paths.count,
+                             ByteFormat.format(selection.bytes)),
+            confirmLabel: l10n.t("confirm.cleanupPermanent.ok")) { [weak self] in
+                guard let self, !self.isBusy else { return }
+                self.isApplying = true
+                Task {
+                    let result = await self.executeCleanupRoute(.installerTrash,
+                        categories: [selection], imageMode: nil, mode: .manual,
+                        permanently: true)
+                    self.installerCandidates = self.installerCandidates?.retainingPaths(
+                        self.installerCandidates?.paths.filter { FileManager.default.fileExists(atPath: $0) } ?? [])
+                    self.isApplying = false
+                    self.reportCleanupResult(result)
+                }
+            }
+    }
+
     func applyCleanup() {
-        guard !isBusy, cleanupScanComplete else {
+        guard !isBusyExcludingUninstall, !cleanupQueued, cleanupScanComplete else {
             if !cleanupScanComplete { statusText = l10n.t("log.scanPartial") }
             return
         }
@@ -1466,6 +1555,16 @@ final class AppState: ObservableObject {
     private func performApply(categories requested: [CleanupCategory],
                               imageMode: String?, family applyFamily: CleanupFamily,
                               mode: CleanupExecutionMode) {
+        if uninstallQueue.activeJob != nil {
+            guard pendingCleanup == nil else { return }
+            cleanupQueued = true
+            statusText = l10n.t("cleanup.queued")
+            pendingCleanup = { [weak self] in
+                self?.performApply(categories: requested, imageMode: imageMode,
+                                   family: applyFamily, mode: mode)
+            }
+            return
+        }
         let requestedCount = requested.reduce(0) { $0 + $1.paths.count }
         isApplying = true
         statusText = l10n.tf("status.processing", requestedCount)
@@ -1502,9 +1601,12 @@ final class AppState: ObservableObject {
             let grouped = Dictionary(grouping: eligible, by: \.applyRoute)
             for route in CleanupApplyRoute.allCases {
                 guard let routeCategories = grouped[route], !routeCategories.isEmpty else { continue }
+                let started = Date()
+                log("cleanup route=\(route.rawValue) started paths=\(routeCategories.reduce(0) { $0 + $1.paths.count })")
                 let routeResult = await executeCleanupRoute(
                     route, categories: routeCategories, imageMode: imageMode, mode: mode,
                     permanently: applyFamily == .clean)
+                log(String(format: "cleanup route=%@ completed %.2fs", route.rawValue, Date().timeIntervalSince(started)))
                 executionResult.merge(routeResult)
             }
 
@@ -1513,20 +1615,12 @@ final class AppState: ObservableObject {
             CleanupCache.invalidate()
             switch applyFamily {
             case .clean:
-                // A successful deletion plan already knows exactly which paths
-                // disappeared. Do not make the user wait for every optional
-                // inventory a second time after every cleanup.
-                if executionResult.failed == 0,
-                   executionResult.removed == eligibleCount {
-                    let removedPaths = Set(eligible.flatMap(\.paths))
-                    categories = categories.compactMap { category in
-                        category.retainingPaths(
-                            category.paths.filter { !removedPaths.contains($0) })
-                    }.sorted(by: CleanupCategory.sizeDescending)
-                    cleanupScanComplete = true
-                } else {
-                    cleanupScanComplete = false
-                }
+                // A skip/failure does not invalidate the completed scan. Remove
+                // confirmed successes and allow the remaining selection to retry;
+                // its original identities and runtime guards still apply.
+                categories = categories.compactMap { category in
+                    category.retainingPaths(executionResult.remainingPaths(in: category.paths))
+                }.sorted(by: CleanupCategory.sizeDescending)
             case .slim: scanSlim()
             case .tools: scanDeveloperTools()
             case .ai: scanAI()
@@ -1540,6 +1634,10 @@ final class AppState: ObservableObject {
         let summary = l10n.tf(
             "cleanup.execution.summary", result.removed, result.skipped, result.failed)
         statusText = summary
+        if quickPanelCleaning {
+            quickPanelStatus = summary + " · " + l10n.t("quick.panel.memory")
+            quickPanelCleaning = false
+        }
         log(summary)
     }
 
@@ -1584,7 +1682,8 @@ final class AppState: ObservableObject {
             return CleanupExecutionResult(
                 removed: summary.removed,
                 skipped: summary.skipped + coalescedCount + max(0, missing),
-                failed: summary.failed)
+                failed: summary.failed,
+                removedPaths: summary.removedPaths)
         default:
             break
         }
@@ -1643,6 +1742,9 @@ final class AppState: ObservableObject {
         logFailure(result, stdoutAlreadyLogged: true)
         var summary = CleanupExecutionResult.reconciled(
             bridgeOutput: result.output, expectedCount: records.count)
+        if summary.removed == records.count {
+            summary.removedPaths = Set(records)
+        }
         summary.skipped += coalescedCount
         return summary
     }
@@ -1668,6 +1770,7 @@ final class AppState: ObservableObject {
         guard visiblePages.indices.contains(selectedTab) else { return }
         if visiblePages[selectedTab] == .processes { refreshProcesses() }
         else if visiblePages[selectedTab] == .ports { refreshPorts() }
+        // Traffic uses its own timer while the page is visible or monitoring is enabled.
     }
 
     func refreshProcesses(allowAutomaticCleanup: Bool = true) {
@@ -1830,18 +1933,26 @@ final class AppState: ObservableObject {
         if row.isNativeApp {
             confirmation = Confirmation(
                 title: l10n.tf("proc.confirm.quit.title", row.name),
-                message: l10n.t("proc.confirm.quit.msg"),
-                confirmLabel: l10n.t("common.quit")) {
+                message: l10n.t("proc.force.message"),
+                confirmLabel: l10n.t("proc.force.action")) {
                     let application = NSRunningApplication(processIdentifier: row.pid)
                     let identityMatches = application.flatMap(RuntimeStore.nativeStartIdentity(for:))
                         == row.startIdentity
                     let requested = identityMatches && !(application?.isTerminated ?? true)
-                        ? (application?.terminate() ?? false)
+                        ? (application?.forceTerminate() ?? false)
                         : false
                     Task { @MainActor in
-                        self.processStatus = requested
+                        self.processActionStatus = requested
                             ? self.l10n.t("status.quitRequested")
                             : self.l10n.t("status.quitRefused")
+                        guard requested, let application else { return }
+                        for _ in 0..<20 {
+                            if application.isTerminated { break }
+                            try? await Task.sleep(nanoseconds: 100_000_000)
+                        }
+                        self.processActionStatus = application.isTerminated
+                            ? self.l10n.t("proc.force.done") : self.l10n.t("status.quitRefused")
+                        self.refreshProcesses(allowAutomaticCleanup: false)
                     }
                 }
             return
@@ -1864,11 +1975,13 @@ final class AppState: ObservableObject {
             message: l10n.tf("proc.confirm.kill.msg", row.pid),
             confirmLabel: l10n.t("proc.kill")) { [weak self] in
                 guard let self else { return }
-                guard !self.runtimeInFlight else { return }
-                self.runtimeInFlight = true
                 Task {
+                    while self.runtimeInFlight {
+                        try? await Task.sleep(nanoseconds: 100_000_000)
+                    }
+                    self.runtimeInFlight = true
                     let result = await MoleEngine.shared.runRuntime(mode, row.signalToken)
-                    self.processStatus = result.succeeded
+                    self.processActionStatus = result.succeeded
                         ? self.l10n.t("status.signalSent")
                         : self.l10n.t("status.signalFailed")
                     self.runtimeInFlight = false
@@ -2090,6 +2203,8 @@ final class AppState: ObservableObject {
 
     func stopUninstallQueueForTermination() {
         isStoppingUninstallQueue = true
+        pendingCleanup = nil
+        cleanupQueued = false
         uninstallInventoryRefreshWorkItem?.cancel()
         for job in uninstallQueue.jobs where job.state.isPending {
             uninstallQueue.cancel(job.id)
@@ -2097,6 +2212,13 @@ final class AppState: ObservableObject {
     }
 
     private func startNextUninstallIfPossible() {
+        if !isStoppingUninstallQueue, let action = pendingCleanup, uninstallQueue.activeJob == nil,
+           !isBusyExcludingUninstall, confirmation == nil, !isDispatchingConfirmation {
+            pendingCleanup = nil
+            cleanupQueued = false
+            action()
+            return
+        }
         // Preserve mutual exclusion at the disk mutation edge while allowing
         // more confirmed requests to join the queue from any visible row.
         let blocked = isBusyExcludingUninstall || confirmation != nil || isDispatchingConfirmation

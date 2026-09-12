@@ -449,18 +449,27 @@ struct MoleSwitchToggleStyle: ToggleStyle {
 }
 
 struct PrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(Color.moleOnAccent)
+            .foregroundStyle(isEnabled ? Color.moleOnAccent : Color.secondary)
             .padding(.horizontal, 14)
             .frame(height: 30)
             .background(
                 Capsule()
-                    .fill(Color.moleAccent.opacity(configuration.isPressed ? 0.55 : 0.72))
-                    .shadow(color: Color.moleAccent.opacity(configuration.isPressed ? 0.10 : 0.18), radius: configuration.isPressed ? 2 : 5, y: 1)
+                    .fill(isEnabled
+                          ? Color.moleAccent.opacity(configuration.isPressed ? 0.55 : 0.72)
+                          : Color.white.opacity(0.055))
+                    .shadow(color: isEnabled
+                            ? Color.moleAccent.opacity(configuration.isPressed ? 0.10 : 0.18)
+                            : .clear,
+                            radius: configuration.isPressed ? 2 : 5, y: 1)
             )
-            .overlay(Capsule().strokeBorder(Color.moleAccentText.opacity(0.22), lineWidth: 1))
+            .overlay(Capsule().strokeBorder(isEnabled
+                                           ? Color.moleAccentText.opacity(0.22)
+                                           : Color.white.opacity(0.06), lineWidth: 1))
             .modifier(MoleButtonFeedbackModifier(isPressed: configuration.isPressed))
     }
 }
@@ -695,11 +704,15 @@ struct PillPicker: View {
 
     @ViewBuilder
     var body: some View {
-        if #available(macOS 26.0, *), !reduceTransparency {
-            nativeGlassPicker
-        } else {
-            fallbackGooeyPicker
+        // 页签过多时（默认窗口宽度放不下）允许横向滚动，而不是压缩或截断。
+        ScrollView(.horizontal, showsIndicators: false) {
+            if #available(macOS 26.0, *), !reduceTransparency {
+                nativeGlassPicker
+            } else {
+                fallbackGooeyPicker
+            }
         }
+        .frame(maxWidth: .infinity)
     }
 
     @available(macOS 26.0, *)

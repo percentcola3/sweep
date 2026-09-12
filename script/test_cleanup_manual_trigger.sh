@@ -44,4 +44,15 @@ cleanup_tab=$(/usr/bin/awk '
 /usr/bin/grep -Fq 'if mode == .quick && scan.cacheable { CleanupCache.save(scan.categories) }' \
     "$APP_STATE" || fail "successful manual scans are no longer cached"
 
+system_tab=$(/usr/bin/awk '
+    /switch pages\[tab\]/ { capture = 1 }
+    capture && /case \.system:/ { system_tab = 1; next }
+    system_tab && /case / { exit }
+    system_tab && !/^[[:space:]]*\/\// && /[^[:space:]]/ { print $1 }
+' "$APP_STATE")
+[[ "$system_tab" == "break" ]] || fail "system tab activation starts work"
+if /usr/bin/grep -Fq 'state.statusText' "$ROOT_DIR/SimpleMole/Views/SystemDataView.swift"; then
+    fail "system data still displays unrelated cleanup progress"
+fi
+
 printf 'PASS: cleanup is manual; tab activation preserves results; pending authorization still resumes\n'

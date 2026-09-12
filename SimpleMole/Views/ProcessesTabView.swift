@@ -23,7 +23,7 @@ struct ProcessesTabView: View {
                     ProgressView()
                         .controlSize(.mini)
                 }
-                Text(state.processStatus)
+                Text(state.processActionStatus.isEmpty ? state.processStatus : state.processActionStatus)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                 Spacer()

@@ -50,10 +50,7 @@ struct QuickPanelView: View {
             }
 
             Button {
-                onOpenMain()
-                DispatchQueue.main.async {
-                    state.requestQuickOptimizeFromQuickPanel()
-                }
+                state.requestQuickOptimizeFromQuickPanel()
             } label: {
                 HStack(spacing: 7) {
                     if state.isScanning || state.isApplying {
@@ -69,6 +66,13 @@ struct QuickPanelView: View {
             }
             .buttonStyle(QuickActionButtonStyle())
             .disabled(state.isScanning || state.isApplying)
+
+            if !state.quickPanelStatus.isEmpty {
+                Text(state.quickPanelStatus)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             HStack {
                 Button { onOpenMain() } label: {

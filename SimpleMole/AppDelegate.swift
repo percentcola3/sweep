@@ -74,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         runtimeTimer?.invalidate()
         HotKeyCenter.shared.unregister()
         MosaicCache.shared.clear()
+        appState.trafficMonitor.flushHistoryForTermination()
         appState.stopUninstallQueueForTermination()
         MoleEngine.shared.cancelAll()
     }
@@ -264,11 +265,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showMainWindow() {
         quickPanel?.orderOut(nil)
         if mainWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 720),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 940, height: 720),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable],
                                   backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
-            window.minSize = NSSize(width: 680, height: 620)
+            window.minSize = NSSize(width: 760, height: 620)
             // 深色玻璃基调：内容延伸进标题栏（fullSizeContentView），标题栏透明，
             // DarkGlassSurface 贯通整窗；标题/交通灯/工具栏按钮浮在玻璃上。
             window.isOpaque = false
@@ -284,6 +285,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             mainWindow = window
         }
         mainWindow?.makeKeyAndOrderFront(nil)
+        if appState.visiblePages.indices.contains(appState.selectedTab),
+           appState.visiblePages[appState.selectedTab] == .traffic {
+            appState.trafficMonitor.setPageVisible(true)
+        }
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -295,7 +300,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] _ in self?.appState.mainWindowVisible = false }
             .store(in: &observables)
         NotificationCenter.default.publisher(for: NSWindow.willCloseNotification, object: window)
-            .sink { [weak self] _ in self?.appState.mainWindowVisible = false }
+            .sink { [weak self] _ in
+                self?.appState.mainWindowVisible = false
+                self?.appState.trafficMonitor.setPageVisible(false)
+            }
             .store(in: &observables)
     }
 

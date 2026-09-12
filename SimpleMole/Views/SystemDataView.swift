@@ -65,7 +65,7 @@ struct SystemDataView: View {
                 state.requestScanAccess(.systemScan)
             } label: {
                 Label(state.systemScanning ? l10n.t("common.scanning")
-                                            : l10n.t("system.rescan"),
+                                            : l10n.t(state.systemHasResult ? "system.rescan" : "system.scan"),
                       systemImage: "arrow.clockwise")
             }
             .buttonStyle(SecondaryButtonStyle())
@@ -81,7 +81,7 @@ struct SystemDataView: View {
             if state.systemScanning {
                 ProgressView().controlSize(.mini)
             }
-            Text(state.statusText)
+            Text(state.systemStatus)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -236,7 +236,7 @@ struct SystemDataView: View {
     }
 
     private var applyLabel: String {
-        if state.isApplying { return l10n.t("cleanup.apply.busy") }
+        if state.systemApplying { return l10n.t("cleanup.apply.busy") }
         return l10n.tf("cleanup.delete.withCount", state.systemSelectedCount,
                        ByteFormat.format(state.systemSelectedBytes))
     }

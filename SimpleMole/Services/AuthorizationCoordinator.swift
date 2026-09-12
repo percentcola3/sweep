@@ -9,6 +9,7 @@ enum ProtectedOperation: Codable, Equatable {
     case cleanupScan(force: Bool)
     case deepCleanupScan
     case quickOptimize
+    case quickPanelClean
     case optimize
     case developerToolsScan
     case aiScan

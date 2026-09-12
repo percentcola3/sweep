@@ -27,6 +27,24 @@ roots=(
 removed=0
 skipped=0
 failed=0
+runtime_guard_rejected=0
+
+# Recheck open-file state at Mole's final mutation edge for both deletion modes.
+# An unavailable snapshot is protected just like an installer currently in use.
+installer_runtime_guard() {
+    local candidate="$1" state=0
+    simplemole_path_open_state "$candidate" || state=$?
+    if [[ "$state" -ne 1 ]]; then
+        runtime_guard_rejected=1
+        return 1
+    fi
+    return 0
+}
+
+simplemole_install_delete_final_guard installer_runtime_guard || {
+    echo "error: could not install final installer runtime guard"
+    exit 1
+}
 
 has_unsafe_path_syntax() {
     local value="$1"
@@ -136,8 +154,11 @@ while IFS= read -r -d '' path; do
         skipped=$((skipped + 1))
         continue
     fi
+    runtime_guard_rejected=0
     if mole_delete "$path" false "$identity"; then
         removed=$((removed + 1))
+    elif [[ "$runtime_guard_rejected" -eq 1 ]]; then
+        skipped=$((skipped + 1))
     else
         failed=$((failed + 1))
     fi

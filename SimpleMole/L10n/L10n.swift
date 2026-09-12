@@ -156,7 +156,9 @@ final class L10n: ObservableObject {
         }
         let withUninstallQueue = withRoadmap.merging(
             L10nUninstallQueueTables.table(for: language)) { _, featureValue in featureValue }
-        return withUninstallQueue.merging(L10nProductivityTables.table(for: language)) {
+        let withProductivity = withUninstallQueue.merging(
+            L10nProductivityTables.table(for: language)) { _, featureValue in featureValue }
+        return withProductivity.merging(L10nTrafficTables.table(for: language)) {
             _, featureValue in featureValue
         }
     }

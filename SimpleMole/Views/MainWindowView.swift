@@ -102,11 +102,11 @@ struct MainWindowView: View {
             WhitelistSheet(state: state)
         }
         .alert(confirmationTitle,
-               isPresented: confirmationBinding) {
-            Button(confirmationAction, role: .destructive) { runConfirmation() }
+               isPresented: confirmationBinding, presenting: state.confirmation) { accepted in
+            Button(accepted.confirmLabel, role: .destructive) { state.runConfirmation(accepted) }
             Button(l10n.t("common.cancel"), role: .cancel) { state.confirmation = nil }
-        } message: {
-            Text(state.confirmation?.message ?? "")
+        } message: { accepted in
+            Text(accepted.message)
         }
         .confirmationDialog(l10n.t("confirm.slimChoice.title"),
                             isPresented: slimBinding,
@@ -279,8 +279,6 @@ struct MainWindowView: View {
     // MARK: 弹窗绑定
 
     private var confirmationTitle: String { state.confirmation?.title ?? "" }
-    private var confirmationAction: String { state.confirmation?.confirmLabel ?? l10n.t("common.done") }
-
     private var confirmationBinding: Binding<Bool> {
         Binding(get: { state.confirmation != nil },
                 set: { if !$0 { state.confirmation = nil } })
@@ -292,9 +290,6 @@ struct MainWindowView: View {
     }
 
     /// 先关闭弹窗再异步执行确认动作，保证动作里再弹出的下一层确认框能正常呈现。
-    private func runConfirmation() {
-        state.runConfirmation()
-    }
 
     private func runSlim(_ mode: String) {
         let request = state.slimRequest
@@ -343,6 +338,7 @@ private struct AnimatedTabContent: View {
             case .devenv: DevEnvTabView(state: state)
             case .processes: ProcessesTabView(state: state)
             case .ports: PortsTabView(state: state)
+            case .traffic: TrafficTabView(state: state)
             case .images: ImagesTabView(state: state)
             case .clipboard: ClipboardHistoryTabView(manager: state.clipboardManager)
             }

@@ -56,7 +56,9 @@ emit_sorted() {
         printf 'entry\t%s\t%s\t%s\t%s\t%s\t%s\n' \
             "$bytes" "$group" "$risk" "$name" "$detail" "$path"
         count=$((count + 1))
-        [[ "$count" -ge "$MAX_ROWS_PER_GROUP" ]] && break
+        # 不可用 "&& break"：作为循环体最后一条语句时会把循环状态置 1，
+        # 经 emit_sorted 返回后在 set -e 下杀死整个脚本。
+        if [[ "$count" -ge "$MAX_ROWS_PER_GROUP" ]]; then break; fi
     done < <(/usr/bin/sort -t "$(printf '\t')" -k1,1 -rn "$scratch" 2>/dev/null)
 }
 
@@ -111,13 +113,20 @@ scan_entry_group() {
 }
 
 # System logs (>= 14 days). Crash reports own the DiagnosticReports subtree.
-scan_file_group logs safe 14 "/Library/Logs/DiagnosticReports" \
-    /Library/Logs /private/var/log
-scan_file_group reports safe 30 "" \
-    /Library/Logs/DiagnosticReports /private/var/db/DiagnosticPipeline
-scan_file_group power safe 30 "" \
-    /private/var/db/powerlog
-# Root-owned caches (>= 30 days): rebuildable, still reviewed per entry.
-scan_entry_group caches safe 30 /Library/Caches
-# Staged Software Update payloads (>= 30 days): keep the review badge.
-scan_entry_group updates review 30 /Library/Updates
+# 测试钩子：SM_SYSTEM_PREVIEW_FIXTURES 指向的文件会用同样的函数在固定
+# fixture 根上重放各分组，让回归测试不依赖机器的真实系统目录。
+if [[ -n "${SM_SYSTEM_PREVIEW_FIXTURES:-}" && -f "$SM_SYSTEM_PREVIEW_FIXTURES" ]]; then
+    # shellcheck disable=SC1090
+    source "$SM_SYSTEM_PREVIEW_FIXTURES"
+else
+    scan_file_group logs safe 14 "/Library/Logs/DiagnosticReports" \
+        /Library/Logs /private/var/log
+    scan_file_group reports safe 30 "" \
+        /Library/Logs/DiagnosticReports /private/var/db/DiagnosticPipeline
+    scan_file_group power safe 30 "" \
+        /private/var/db/powerlog
+    # Root-owned caches (>= 30 days): rebuildable, still reviewed per entry.
+    scan_entry_group caches safe 30 /Library/Caches
+    # Staged Software Update payloads (>= 30 days): keep the review badge.
+    scan_entry_group updates review 30 /Library/Updates
+fi

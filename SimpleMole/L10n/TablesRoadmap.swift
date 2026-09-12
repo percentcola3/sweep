@@ -3,6 +3,14 @@ import Foundation
 /// 风险模型与扩展管理器的独立语言表；未翻译语言自动回退英文。
 enum L10nRoadmapTables {
     static let en: [String: String] = [
+        "quick.panel.permission": "Open More to grant disk access, then retry.",
+        "quick.panel.memory": "Requested app-owned memory reclamation",
+        "cleanup.queued": "Waiting for uninstall to finish",
+        "cleanup.installers.review": "Installer candidates · select files you no longer need to delete permanently",
+        "cleanup.installers.confirm": "Permanently delete %d selected installers (%@)? Confirm that you no longer need these files. They will not be moved to Trash and cannot be recovered from it.",
+        "proc.force.message": "Force quit this app? Unsaved changes may be lost.",
+        "proc.force.action": "Force Quit",
+        "proc.force.done": "App has exited",
         "cleanup.risk.safe": "Safe",
         "cleanup.risk.warning": "Warning",
         "cleanup.risk.protected": "Protected",
@@ -26,6 +34,8 @@ enum L10nRoadmapTables {
         "cleanup.risk.runningApplication": "Protected because its owning application is running.",
         "cleanup.risk.runtimeUnknown": "Protected because running applications could not be read.",
         "cleanup.risk.runtimeUnsupported": "No reliable running-state check is available.",
+        "cleanup.risk.messengerCache": "Regenerable media or document cache; quit the owning app first.",
+        "cleanup.risk.durableIMData": "Chat data, login state, or site storage is protected.",
         "cleanup.risk.protectedContent": "Protected user, model, Docker, or system content.",
         "cleanup.risk.invalidPath": "Invalid or untrusted path.",
         "cleanup.risk.unknown": "Unknown content; review manually.",
@@ -135,6 +145,14 @@ enum L10nRoadmapTables {
     ]
 
     static let zhHans: [String: String] = [
+        "quick.panel.permission": "请点“更多”授予磁盘权限后重试。",
+        "quick.panel.memory": "已尝试回收本应用闲置内存",
+        "cleanup.queued": "等待卸载完成后清理",
+        "cleanup.installers.review": "安装包候选 · 勾选不再需要的文件后永久删除",
+        "cleanup.installers.confirm": "永久删除选中的 %d 个安装包（%@）？请确认这些文件不再需要。删除后不会进入废纸篓，无法从废纸篓恢复。",
+        "proc.force.message": "强制结束此应用？未保存的内容可能丢失。",
+        "proc.force.action": "强制结束",
+        "proc.force.done": "应用已结束",
         "cleanup.risk.safe": "Safe",
         "cleanup.risk.warning": "Warning",
         "cleanup.risk.protected": "Protected",
@@ -158,6 +176,8 @@ enum L10nRoadmapTables {
         "cleanup.risk.runningApplication": "所属应用正在运行，已自动保护。",
         "cleanup.risk.runtimeUnknown": "无法完整读取运行状态，已保守保护。",
         "cleanup.risk.runtimeUnsupported": "当前内容缺少可靠的运行态检查。",
+        "cleanup.risk.messengerCache": "可再生媒体/文档缓存；请先退出对应应用。",
+        "cleanup.risk.durableIMData": "聊天数据、登录态或站点数据已受保护。",
         "cleanup.risk.protectedContent": "用户数据、模型、Docker 或系统内容已受保护。",
         "cleanup.risk.invalidPath": "路径无效或不可信。",
         "cleanup.risk.unknown": "内容类型未知，需要手动判断。",
@@ -267,6 +287,14 @@ enum L10nRoadmapTables {
     ]
 
     static let zhHant: [String: String] = [
+        "quick.panel.permission": "請點「更多」授予磁碟權限後重試。",
+        "quick.panel.memory": "已嘗試回收本應用閒置記憶體",
+        "cleanup.queued": "等待解除安裝完成後清理",
+        "cleanup.installers.review": "安裝包候選 · 勾選不再需要的檔案後永久刪除",
+        "cleanup.installers.confirm": "永久刪除選取的 %d 個安裝包（%@）？請確認這些檔案不再需要。刪除後不會進入垃圾桶，無法從垃圾桶復原。",
+        "proc.force.message": "強制結束此應用？未儲存的內容可能遺失。",
+        "proc.force.action": "強制結束",
+        "proc.force.done": "應用已結束",
         "cleanup.risk.safe": "Safe",
         "cleanup.risk.warning": "Warning",
         "cleanup.risk.protected": "Protected",
@@ -290,6 +318,8 @@ enum L10nRoadmapTables {
         "cleanup.risk.runningApplication": "所屬應用正在執行，已自動保護。",
         "cleanup.risk.runtimeUnknown": "無法完整讀取執行狀態，已保守保護。",
         "cleanup.risk.runtimeUnsupported": "目前內容缺少可靠的執行狀態檢查。",
+        "cleanup.risk.messengerCache": "可再生媒體/文件快取；請先退出對應應用。",
+        "cleanup.risk.durableIMData": "聊天資料、登入狀態或網站資料已受保護。",
         "cleanup.risk.protectedContent": "使用者資料、模型、Docker 或系統內容已受保護。",
         "cleanup.risk.invalidPath": "路徑無效或不可信。",
         "cleanup.risk.unknown": "內容類型未知，需要手動判斷。",

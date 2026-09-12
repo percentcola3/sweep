@@ -548,4 +548,153 @@ enum Parsers {
         }
         return (proxies, hosts)
     }
+
+    // MARK: - 流量监控
+
+    /// 解析 netmon 字节快照 TSV：`proc\tpid\tbytes_in\tbytes_out\tcomm`。
+    /// comm 是最后一列，可含空格（nettop 的进程名保留原始宽度）。
+    static func netmonProcessSamples(_ text: String) -> [NetmonProcessSample] {
+        var samples: [NetmonProcessSample] = []
+        for line in text.components(separatedBy: "\n") {
+            let parts = line.components(separatedBy: "\t")
+            guard parts.count >= 5, parts[0] == "proc",
+                  let pid = Int32(parts[1]), pid > 0,
+                  let bytesIn = UInt64(parts[2]),
+                  let bytesOut = UInt64(parts[3]),
+                  !parts[4].isEmpty else { continue }
+            samples.append(NetmonProcessSample(pid: pid, bytesIn: bytesIn,
+                                               bytesOut: bytesOut, command: parts[4]))
+        }
+        return samples
+    }
+
+    /// 解析连接快照 TSV：`flow\tpid\tcomm\tproto\tlocal\tremote`。
+    static func netmonFlows(_ text: String) -> [NetmonFlow] {
+        var flows: [NetmonFlow] = []
+        for line in text.components(separatedBy: "\n") {
+            let parts = line.components(separatedBy: "\t")
+            guard parts.count == 6, parts[0] == "flow",
+                  let pid = Int32(parts[1]), pid > 0,
+                  !parts[2].isEmpty, !parts[5].isEmpty else { continue }
+            flows.append(NetmonFlow(pid: pid, command: parts[2],
+                                    proto: parts[3], local: parts[4], remote: parts[5]))
+        }
+        return flows
+    }
+
+    /// 解析路由查询 TSV：`route\taddress\tinterface`。
+    static func netmonRoutes(_ text: String) -> [NetmonRoute] {
+        var routes: [NetmonRoute] = []
+        for line in text.components(separatedBy: "\n") {
+            let parts = line.components(separatedBy: "\t")
+            guard parts.count == 3, parts[0] == "route",
+                  !parts[1].isEmpty, !parts[2].isEmpty else { continue }
+            routes.append(NetmonRoute(address: parts[1], interface: parts[2]))
+        }
+        return routes
+    }
+
+    /// 解析 Clash 发现 TSV，保留全部代理入口以及真正的 mixed-port。
+    static func clashDiscovery(_ text: String) -> ClashDiscovery {
+        var discovery = ClashDiscovery()
+        for line in text.components(separatedBy: "\n") {
+            let parts = line.components(separatedBy: "\t")
+            guard parts.count == 2 else { continue }
+            switch parts[0] {
+            case "endpoint": discovery.endpoints.append(parts[1])
+            case "secret": discovery.secret = parts[1]
+            case "mixedport", "proxyport":
+                guard let port = Int(parts[1]), (1...65535).contains(port) else { continue }
+                discovery.proxyPorts.insert(port)
+                if parts[0] == "mixedport", discovery.mixedPort == nil {
+                    discovery.mixedPort = port
+                }
+            default: break
+            }
+        }
+        return discovery
+    }
+}
+
+/// Clash / mihomo external controller `GET /connections` 的载荷模型。
+/// 只依赖 Foundation，便于与 Parsers 一起被离线单测。
+enum ClashAPI {
+    struct ConnectionsPayload: Codable, Equatable, Sendable {
+        var downloadTotal: UInt64
+        var uploadTotal: UInt64
+        var connections: [Connection]?
+    }
+
+    struct Connection: Codable, Equatable, Sendable {
+        var id: String
+        var metadata: Metadata
+        var upload: UInt64
+        var download: UInt64
+        var start: String
+        var chains: [String]?
+        var rule: String?
+        var rulePayload: String?
+
+        struct Metadata: Codable, Equatable, Sendable {
+            var network: String?
+            var type: String?
+            var sourceIP: String?
+            var sourcePort: String?
+            var destinationIP: String?
+            var destinationPort: String?
+            var host: String?
+            var process: String?
+            var processPath: String?
+
+            init(network: String? = nil, type: String? = nil,
+                 sourceIP: String? = nil, sourcePort: String? = nil,
+                 destinationIP: String? = nil, destinationPort: String? = nil,
+                 host: String? = nil, process: String? = nil, processPath: String? = nil) {
+                self.network = network
+                self.type = type
+                self.sourceIP = sourceIP
+                self.sourcePort = sourcePort
+                self.destinationIP = destinationIP
+                self.destinationPort = destinationPort
+                self.host = host
+                self.process = process
+                self.processPath = processPath
+            }
+
+            private enum CodingKeys: String, CodingKey {
+                case network, type, sourceIP, sourcePort, destinationIP, destinationPort
+                case host, process, processPath
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                network = try container.decodeIfPresent(String.self, forKey: .network)
+                type = try container.decodeIfPresent(String.self, forKey: .type)
+                sourceIP = try container.decodeIfPresent(String.self, forKey: .sourceIP)
+                sourcePort = try Self.decodePort(.sourcePort, from: container)
+                destinationIP = try container.decodeIfPresent(String.self, forKey: .destinationIP)
+                destinationPort = try Self.decodePort(.destinationPort, from: container)
+                host = try container.decodeIfPresent(String.self, forKey: .host)
+                process = try container.decodeIfPresent(String.self, forKey: .process)
+                processPath = try container.decodeIfPresent(String.self, forKey: .processPath)
+            }
+
+            /// Clash/Mihomo versions encode ports as either strings or JSON numbers.
+            private static func decodePort(_ key: CodingKeys,
+                                           from container: KeyedDecodingContainer<CodingKeys>) throws -> String? {
+                if let value = try? container.decode(String.self, forKey: key) { return value }
+                return try container.decodeIfPresent(UInt16.self, forKey: key).map(String.init)
+            }
+        }
+
+        /// mihomo 的 chains 记录途经的出站策略；含 DIRECT 即
+        /// “进了代理但实际直连出走”，与顺序无关。
+        var isDirectExit: Bool {
+            chains?.contains("DIRECT") == true
+        }
+    }
+
+    static func connections(from data: Data) -> ConnectionsPayload? {
+        try? JSONDecoder().decode(ConnectionsPayload.self, from: data)
+    }
 }

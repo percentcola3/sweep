@@ -52,7 +52,7 @@ struct UninstallTabView: View {
                       systemImage: "arrow.clockwise")
             }
             .buttonStyle(SecondaryButtonStyle())
-            .disabled(state.isBusy || state.isScanningApps)
+            .disabled(state.uninstallQueue.hasWork || state.isScanningApps)
         }
         .padding(.horizontal, 16)
         .padding(.top, 14)

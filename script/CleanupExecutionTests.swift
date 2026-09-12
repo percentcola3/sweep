@@ -30,5 +30,19 @@ struct CleanupExecutionTests {
         aggregate.merge(complete)
         try expect(aggregate == CleanupExecutionResult(removed: 3, skipped: 6, failed: 1),
                    "runtime skips and route results were not aggregated separately")
+
+        var partial = CleanupExecutionResult(removed: 1, skipped: 1, failed: 1,
+                                             removedPaths: ["/cache/deleted"])
+        let scanned = ["/cache/deleted", "/cache/deleted/child", "/cache/deleted-sibling",
+                       "/cache/in-use", "/cache/failed"]
+        try expect(partial.remainingPaths(in: scanned) ==
+                    ["/cache/deleted-sibling", "/cache/in-use", "/cache/failed"],
+                   "partial cleanup must retain skipped/failed paths and remove coalesced descendants")
+        partial.merge(CleanupExecutionResult(removed: 1, removedPaths: ["/cache/failed"]))
+        try expect(partial.remainingPaths(in: scanned) == ["/cache/deleted-sibling", "/cache/in-use"],
+                   "successful retry must remove only its confirmed paths")
+        let skipped = CleanupExecutionResult(skipped: 3)
+        try expect(skipped.remainingPaths(in: scanned) == scanned,
+                   "a failed open-file probe must preserve all paths for retry")
     }
 }

@@ -115,6 +115,8 @@ enum CleanupActivityGuard: String, Codable, CaseIterable, Hashable, Sendable {
     case simulator
     case packageManager
     case ide
+    /// IM/国民应用（Telegram、飞书、微信等）的缓存：应用退出前一律保护。
+    case messenger
     case unsupported
 }
 
@@ -424,6 +426,132 @@ struct PortRow: Identifiable, Hashable {
     let endpoint: String
     var id: String { "\(port)-\(pid)-\(endpoint)" }
     var signalToken: String { "\(pid)|\(startIdentity)" }
+}
+
+/// 流量出口分类：应用流量最终从哪里离开本机。
+enum TrafficExitKind: String, CaseIterable, Codable, Sendable {
+    /// 应用自己的连接，路由落在物理口（en*）。
+    case direct
+    /// 应用自己的连接，路由落在隧道口（utun*）。
+    case tunnel
+    /// 经 Clash/mihomo 承载，但核心判定为直连出站。
+    case proxyDirect
+    /// 经 Clash/mihomo 承载并转发到代理节点。
+    case proxyNode
+    /// 流量进了 Clash 本地端口，但控制器不可用、去向未知。
+    case proxy
+    /// 本机回环目标（非 Clash 端口）。
+    case loopback
+    /// 尚无可信路由或出站信息。
+    case unknown
+
+    var titleKey: String { "netmon.exit.\(rawValue)" }
+}
+
+enum TrafficSortOrder: String, CaseIterable, Sendable {
+    case proxyNode, clashTotal, appTotal
+    var titleKey: String { "netmon.sort.\(rawValue)" }
+
+    func bytes(in row: TrafficAppRow) -> UInt64 {
+        switch self {
+        case .proxyNode: return row.proxyNodeTotal
+        case .clashTotal: return row.clashTotal
+        case .appTotal: return row.sampledTotal
+        }
+    }
+
+    func sorted(_ rows: [TrafficAppRow]) -> [TrafficAppRow] {
+        rows.sorted {
+            let lhs = bytes(in: $0), rhs = bytes(in: $1)
+            if lhs != rhs { return lhs > rhs }
+            if $0.clashTotal != $1.clashTotal { return $0.clashTotal > $1.clashTotal }
+            if $0.sampledTotal != $1.sampledTotal { return $0.sampledTotal > $1.sampledTotal }
+            if $0.displayName != $1.displayName {
+                return $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+            }
+            return $0.appKey < $1.appKey
+        }
+    }
+}
+
+/// 按应用聚合；系统采样与 Clash 为独立观测口径，不相加。
+struct TrafficAppRow: Identifiable, Equatable, Sendable {
+    /// 稳定键：应用使用最外层 app 的 bundleID 或路径，其余进程使用可执行文件名。
+    let appKey: String
+    var displayName: String
+    var bundleIdentifier: String?
+    var representativePID: Int32
+    /// 采样累计的会话下行/上行（所有出口合计，近似值）。
+    var sessionDown: UInt64
+    var sessionUp: UInt64
+    /// 最近一个采样窗口的速率（字节/秒）。
+    var rateDown: Double
+    var rateUp: Double
+    /// Clash 归属：经代理但直连出走 / 转发到代理节点。
+    var proxyDirectDown: UInt64
+    var proxyDirectUp: UInt64
+    var proxyNodeDown: UInt64
+    var proxyNodeUp: UInt64
+    var proxyUnknownDown: UInt64 = 0
+    var proxyUnknownUp: UInt64 = 0
+    var proxyNodeTotal: UInt64 { proxyNodeDown + proxyNodeUp }
+    var clashTotal: UInt64 { proxyNodeTotal + proxyDirectDown + proxyDirectUp + proxyUnknownDown + proxyUnknownUp }
+    var sampledTotal: UInt64 { sessionDown + sessionUp }
+    var connectionCount: Int
+    /// 端点分类集合，用于行内 badge。
+    var exitKinds: [TrafficExitKind]
+    var id: String { appKey }
+}
+
+/// 单个远端端点（lsof 快照或 Clash 连接映射而来）。
+struct TrafficEndpointRow: Identifiable, Equatable, Sendable {
+    let appKey: String
+    /// 展示用远端（host:port，优先域名）。
+    let remote: String
+    let proto: String
+    var kind: TrafficExitKind
+    /// Clash 连接的目标域名（SNI/Host，有则展示）。
+    var clashHost: String?
+    /// Clash 出站链（组 → 节点原样展示）。
+    var clashChains: [String]
+    var clashRule: String
+    /// 本次记录期间的 Clash 字节，按目标、出站链和规则累计，连接结束后保留。
+    var clashDown: UInt64
+    var clashUp: UInt64
+    var lastSeen: Date? = nil
+    var activeConnections: Int = 0
+    var id: String { "\(appKey)|\(proto)|\(remote)|\(kind.rawValue)|\(clashChains.joined(separator: "/"))|\(clashRule)" }
+}
+
+/// nettop 进程汇总字节快照；作为独立的近似观测值。
+struct NetmonProcessSample: Equatable, Sendable {
+    let pid: Int32
+    let bytesIn: UInt64
+    let bytesOut: UInt64
+    let command: String
+}
+
+/// lsof 连接快照行（仅已连接 socket，不含监听）。
+struct NetmonFlow: Equatable, Sendable {
+    let pid: Int32
+    let command: String
+    let proto: String
+    let local: String
+    let remote: String
+}
+
+/// 路由查询结果：地址 → 出接口。
+struct NetmonRoute: Equatable, Sendable {
+    let address: String
+    let interface: String
+}
+
+/// Clash 本地核心发现结果。
+struct ClashDiscovery: Equatable, Sendable {
+    var endpoints: [String] = []
+    var secret: String?
+    var mixedPort: Int?
+    var proxyPorts: Set<Int> = []
 }
 
 /// 图片清单条目。

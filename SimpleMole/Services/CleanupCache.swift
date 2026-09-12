@@ -7,7 +7,7 @@ enum CleanupCache {
     // changes. In particular, the cleanup page now includes all ordinary
     // top-level Trash entries and the expanded AI safe-cache bridge; restoring
     // an older snapshot would silently hide those candidates.
-    private static let version = 16
+    private static let version = 18
     private static let maximumAge: TimeInterval = 5 * 60
 
     private static var cacheURL: URL {

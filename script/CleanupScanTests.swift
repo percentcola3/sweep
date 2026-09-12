@@ -29,10 +29,15 @@ struct CleanupScanTests {
         try write("Library/Caches/Codex/Default/Cache/entry")
         try write("Library/Caches/Codex/Default/Cookies")
         try write("Library/Application Support/Cursor/Cache/entry")
+        try write("Library/Application Support/Cursor/CachedData/entry")
+        try write("Library/Application Support/Cursor/logs/entry")
         try write("Library/Application Support/Cursor/User/settings.json")
         try write(".cache/huggingface/models/weights")
         try write(".codex/sessions/history.jsonl")
         try write(".npm/_cacache/package")
+        try write(".npm/custom-data/keep")
+        try write(".pnpm-store/v3/files/keep")
+        try write("Library/pnpm/store/v3/files/keep")
         try write(".Trash/old.log")
         try write("Library/Application Support/Example/Cache/entry")
         try write("Library/Containers/com.example.other/Data/Library/Caches/entry")
@@ -51,6 +56,9 @@ struct CleanupScanTests {
 
         let quick = await NativeCore.shared.scanCleanup(homeDirectory: home.path)
         let quickPaths = quick.categories.flatMap(\.paths)
+        let cursor = quick.categories.filter { $0.name == "Cursor" }
+        expect(cursor.count == 1 && cursor[0].paths.count == 3, "Cursor cache leaves must share one policy-preserving group")
+        expect(!quick.categories.contains { $0.name == "User Caches" }, "generic cache labels hide ownership")
         expect(quick.succeeded && quick.deferredPaths.isEmpty, "quick fixture did not complete")
         expect(quickPaths.contains(home.path + "/Library/Caches/com.example.ordinary"), "ordinary cache group lost")
         expect(quickPaths.contains(home.path + "/Library/Caches/com.example.second"), "sibling cache group lost")
@@ -60,7 +68,9 @@ struct CleanupScanTests {
             homeDirectory: home.path).risk == .protected, "empty-cache profile parent was not protected")
         expect(CleanupRiskPolicy.core(section: "Caches", path: home.path + "/Library/Caches/Codex/Default/Cookies",
             homeDirectory: home.path).risk == .protected, "profile cookies were not protected")
-        expect(quickPaths.contains(home.path + "/.npm"), "developer cache missing")
+        expect(quickPaths.contains(home.path + "/.npm/_cacache"), "developer cache missing")
+        expect(!quickPaths.contains(home.path + "/.npm"), "whole npm root must not be offered")
+        expect(!quickPaths.contains(where: { $0.contains("/.pnpm-store") || $0.contains("/Library/pnpm/store") }), "pnpm store must not be deleted directly")
         expect(quickPaths.contains(home.path + "/.Trash/old.log"), "Trash missing")
         expect(!quickPaths.contains(where: { $0.contains("huggingface") || $0.contains("sessions")
             || $0.contains("linked") || $0.contains("whitelisted") }), "protected path admitted")
@@ -102,6 +112,9 @@ struct CleanupScanTests {
         let watchdog = DispatchWorkItem { exit(2) }
         DispatchQueue.global().asyncAfter(deadline: .now() + 12, execute: watchdog)
         let output = SystemMetrics.commandOutput("/usr/bin/head", arguments: ["-c", "262144", "/dev/zero"])
+        let timeoutStart = Date()
+        let timedOut = SystemMetrics.commandOutput("/bin/sleep", arguments: ["10"], timeoutSeconds: 0.1)
+        expect(timedOut == nil && Date().timeIntervalSince(timeoutStart) < 2, "command timeout failed")
         watchdog.cancel()
         expect(output?.utf8.count == 262144, "process output deadlocked or was truncated")
 
